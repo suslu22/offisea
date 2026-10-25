@@ -552,6 +552,8 @@ export async function mountWord(root, data, app) {
   setTimeout(() => { page.focus({ preventScroll: true }); }, 50);
 
   return {
+    // Telefonun geri tuşu: önce açık arama çubuğunu kapat
+    onBackButton: () => { if (findBar.hidden) return false; findBar.hidden = true; return true; },
     serialize: () => ({ html: page.innerHTML }),
     primaryExport: { label: 'Word (.docx) olarak indir', run: (title) => exportDocxFile(title) },
     fileMenu: (title) => [

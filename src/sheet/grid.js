@@ -2065,6 +2065,12 @@ export async function mountSheet(root, data, app) {
   setTimeout(() => focusGrid({ preventScroll: true }), 50);
 
   return {
+    // Telefonun geri tuşu: önce hücre düzenlemeyi bitir (yazılan kaybolmaz), sonra arama çubuğunu kapat
+    onBackButton: () => {
+      if (editing) { commitEdit(); return true; }
+      if (!findBar.hidden) { findBar.hidden = true; focusGrid(); return true; }
+      return false;
+    },
     serialize: () => { wb.active = si; return wb.serialize(); },
     primaryExport: { label: 'Excel (.xlsx) olarak indir', run: (title) => exportFile('xlsx', title) },
     fileMenu: (title) => [

@@ -1,7 +1,7 @@
 {
   "name": "offisea",
   "productName": "Offisea",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Ücretsiz, çevrimdışı çalışan ofis uygulaması: belge, tablo, sunum ve PDF.",
   "private": true,
   "type": "module",

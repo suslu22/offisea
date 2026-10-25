@@ -1762,6 +1762,8 @@ export async function mountSlides(root, data, app) {
     insertImageFile,
     flush: () => { if (editing) syncEdit(); },
     handleBack,
+    // Telefonun geri tuşu: önce metin düzenlemeyi bitir
+    onBackButton: () => { if (!editing) return false; endEdit(); return true; },
     destroy() {
       if (show) show.teardown();
       clearTimeout(thumbTimer);

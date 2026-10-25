@@ -115,8 +115,12 @@ export function tselect(options, onChange, { title, value, width, cls = '' } = {
 
 // ---- Açılır menü -------------------------------------------------------------
 let openMenuEl = null;
+/** Açık menüyü kapatır; kapatacak menü varsa true döner. */
 export function closeMenus() {
-  if (openMenuEl) { openMenuEl.remove(); openMenuEl = null; }
+  if (!openMenuEl) return false;
+  openMenuEl.remove();
+  openMenuEl = null;
+  return true;
 }
 
 export function popupMenu(anchorOrPoint, items, { minWidth = 200 } = {}) {
@@ -202,6 +206,15 @@ export function colorPicker(anchor, onPick, { noneLabel = null } = {}) {
 }
 
 // ---- Diyaloglar --------------------------------------------------------------
+const modalStack = []; // açık diyaloglar (en üstteki en sonda)
+/** En üstteki diyaloğu "İptal" gibi kapatır (telefonun geri tuşu için). Kapatılan varsa true. */
+export function closeTopModal() {
+  const top = modalStack[modalStack.length - 1];
+  if (!top) return false;
+  top(null);
+  return true;
+}
+
 export function modal({ title, body, actions = [{ label: 'Tamam', value: true, primary: true }], onOpen }) {
   return new Promise((resolve) => {
     const prevFocus = document.activeElement;
@@ -211,6 +224,9 @@ export function modal({ title, body, actions = [{ label: 'Tamam', value: true, p
     if (body) dlg.append(h('div', { class: 'modal-body' }, body));
     const foot = h('div', { class: 'modal-actions' });
     const done = (v) => {
+      const i = modalStack.indexOf(done);
+      if (i < 0) return; // zaten kapandı
+      modalStack.splice(i, 1);
       overlay.remove();
       document.removeEventListener('keydown', onKey, true);
       if (prevFocus && prevFocus.focus) try { prevFocus.focus({ preventScroll: true }); } catch { /* yok say */ }
@@ -223,12 +239,14 @@ export function modal({ title, body, actions = [{ label: 'Tamam', value: true, p
     overlay.append(dlg);
     overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) done(null); });
     const onKey = (e) => {
+      if (modalStack[modalStack.length - 1] !== done) return; // yalnızca en üstteki diyalog tuşları işler
       if (e.key === 'Escape') { e.stopPropagation(); done(null); }
       if (e.key === 'Enter' && e.target.tagName !== 'TEXTAREA') {
         const p = actions.find((a) => a.primary);
         if (p) { e.preventDefault(); e.stopPropagation(); done(typeof p.value === 'function' ? p.value() : p.value); }
       }
     };
+    modalStack.push(done);
     document.addEventListener('keydown', onKey, true);
     document.body.append(overlay);
     const first = dlg.querySelector('input, select, textarea') || dlg.querySelector('.btn-primary');

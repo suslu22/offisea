@@ -1,7 +1,7 @@
 // Offisea uygulama kabuğu: yönlendirme, üst çubuk, dosya açma, otomatik kayıt.
 import './fonts.css';
 import './styles.css';
-import { h, icon, clear, debounce, toast, popupMenu, closeMenus, tbtn } from './core/ui.js';
+import { h, icon, clear, debounce, toast, popupMenu, closeMenus, closeTopModal, tbtn } from './core/ui.js';
 import { saveDoc, loadDoc, newId, getPref, setPref } from './core/storage.js';
 import { pickFile, kindOf, legacyMessage, baseName, readArrayBuffer, MAX_FILE_BYTES, ACCEPT_ALL } from './core/files.js';
 import { isNative, isElectron, openExternal } from './core/platform.js';
@@ -303,18 +303,30 @@ if (isElectron() && window.offiseaDesktop) {
   if (window.offiseaDesktop.onCloseRequest) window.offiseaDesktop.onCloseRequest(() => saveNow());
 }
 
-// Android: geri tuşu
+// Telefonun geri tuşu. Sıra: açık diyalog → açık menü → slayt gösterisi → düzenleyicinin kendi durumu
+// (arama çubuğu, hücre/metin düzenleme) → belgeden ana ekrana → ana ekranda iki kez basınca çıkış.
+let lastBackAtHome = 0;
+function handleBackButton(exitApp) {
+  if (closeTopModal()) return;
+  if (closeMenus()) return;
+  if (history.state && history.state.slideshow) { history.back(); return; }
+  if (cur) {
+    try { if (cur.editor.onBackButton && cur.editor.onBackButton()) return; } catch (e) { console.warn(e); }
+    goHome();
+    return;
+  }
+  if (DOC_RE.test(location.hash)) { goHome(); return; } // belge henüz açılıyor
+  const now = Date.now();
+  if (now - lastBackAtHome < 2000) { exitApp(); return; }
+  lastBackAtHome = now;
+  toast('Çıkmak için tekrar basın.', { timeout: 2000 });
+}
+if (import.meta.env.DEV) window.__offiseaBack = () => handleBackButton(() => console.log('exitApp'));
+
+// Android
 if (isNative()) {
   import('@capacitor/app').then(({ App }) => {
-    App.addListener('backButton', () => {
-      if (document.querySelector('.modal-overlay')) {
-        document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-        return;
-      }
-      if (document.querySelector('.popup-menu')) { closeMenus(); return; }
-      if (DOC_RE.test(location.hash) || (history.state && history.state.slideshow)) { history.back(); return; }
-      App.exitApp();
-    });
+    App.addListener('backButton', () => handleBackButton(() => App.exitApp()));
     // "Birlikte aç" ile gelen dosyalar (uygulama kapalıyken veya açıkken)
     App.getLaunchUrl().then((r) => { if (r && r.url) openNativeUrl(r.url); }).catch(() => {});
     App.addListener('appUrlOpen', (e) => { if (e && e.url) openNativeUrl(e.url); });

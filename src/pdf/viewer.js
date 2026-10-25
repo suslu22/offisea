@@ -439,6 +439,7 @@ export async function mountPdf(root, data, app) {
   void app;
 
   return {
+    onBackButton: () => { if (findBar.hidden) return false; findBar.hidden = true; return true; },
     readOnly: true,
     serialize: () => data,
     primaryExport: { label: 'PDF dosyasını kaydet', run: (title) => saveBlob(new Blob([bytes], { type: 'application/pdf' }), `${title}.pdf`) },
