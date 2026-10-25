@@ -10,7 +10,7 @@
 | Sürüm | Nasıl kullanılır |
 |---|---|
 | **Web / PWA** | Tarayıcıdan açılır; telefonda ve bilgisayarda "Ana ekrana ekle / Yükle" ile uygulama gibi kurulur, internetsiz de çalışır. |
-| **Windows** | Kurulum dosyası (`Offisea-1.0.0-Kurulum-x64.exe`, ARM için `-arm64`) veya kurulumsuz taşınabilir sürüm (`Offisea-1.0.0-Tasinabilir.exe`). |
+| **Windows** | Kurulum dosyası (`Offisea-Kurulum-x64.exe`, ARM için `-arm64`, ikisini birden içeren `Offisea-Kurulum.exe`) veya kurulumsuz taşınabilir sürüm (`Offisea-Tasinabilir.exe`). |
 | **Android** | `Offisea.apk` (Android 7.0 ve üzeri). |
 
 Her üç sürüm de aynı özelliklere sahiptir.

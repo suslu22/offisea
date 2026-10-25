@@ -1,5 +1,5 @@
 // İndirme sayfası: son sürümün dosya bağlantılarını GitHub'dan alır.
-// Bağlantılar alınamazsa sayfadaki hazır bağlantılar (v1.0.0) kullanılır.
+// Bağlantılar alınamazsa sayfadaki hazır bağlantılar kullanılır; onlar da her zaman en yeni sürümü indirir.
 (function () {
   'use strict';
   var REPO = 'https://github.com/suslu22/offisea/';

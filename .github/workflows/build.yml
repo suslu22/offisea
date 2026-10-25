@@ -190,5 +190,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
+          # Dosya adlarından sürüm numarası çıkarılır; böylece "releases/latest/download/..." bağlantıları hep en yeni sürümü indirir
+          for f in out/Offisea-*-*.exe; do mv "$f" "out/Offisea-${f#out/Offisea-*-}"; done
           ls -la out
           gh release create "$GITHUB_REF_NAME" out/*.apk out/*.exe --title "Offisea $GITHUB_REF_NAME" --generate-notes --verify-tag
