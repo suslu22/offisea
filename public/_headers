@@ -1,0 +1,23 @@
+# Netlify / Cloudflare Pages güvenlik başlıkları (diğer sunucularda karşılıklarını ekleyin)
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; media-src 'self' data: blob:; connect-src 'self' data: blob:; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; manifest-src 'self'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  X-Frame-Options: DENY
+  Cross-Origin-Opener-Policy: same-origin
+  Cross-Origin-Resource-Policy: same-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), hid=(), bluetooth=(), interest-cohort=()
+  Strict-Transport-Security: max-age=63072000; includeSubDomains
+
+/sw.js
+  Cache-Control: no-cache
+/index.html
+  Cache-Control: no-cache
+# Güncelleme bilgisi her zaman sunucudan taze okunmalı
+/version.json
+  Cache-Control: no-cache
+/update.json
+  Cache-Control: no-cache
+# Adı içeriğinin özetini taşıyan dosyalar hiç değişmez; uzun süre önbellekte tutulabilir
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable

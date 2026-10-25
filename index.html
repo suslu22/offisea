@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <!-- %CSP% -->
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="color-scheme" content="light dark" />
+  <meta name="theme-color" content="#f2f7fa" />
+  <meta name="description" content="Offisea: ücretsiz, reklamsız, çevrimdışı çalışan ofis uygulaması. Word, Excel, PowerPoint ve PDF dosyalarını açın ve düzenleyin." />
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <title>Offisea</title>
+</head>
+<body>
+  <div id="app">
+    <header id="topbar" class="topbar"></header>
+    <main id="view" class="view"></main>
+  </div>
+  <div id="print-area" class="print-area" aria-hidden="true"></div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <noscript>Offisea'yı kullanmak için JavaScript'i etkinleştirin.</noscript>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

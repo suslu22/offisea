@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paylaşım için yalnızca Offisea'nın kendi kaydettiği dosyalar ve önbellek açılır (tüm depolama değil). -->
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <external-path name="offisea_documents" path="Documents/Offisea/" />
+    <cache-path name="offisea_cache" path="." />
+</paths>

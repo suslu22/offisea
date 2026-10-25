@@ -1,0 +1,17 @@
+{
+  "appId": "app.offisea.office",
+  "appName": "Offisea",
+  "webDir": "dist",
+  "loggingBehavior": "none",
+  "server": {
+    "androidScheme": "https",
+    "hostname": "localhost",
+    "cleartext": false
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": false,
+    "webContentsDebuggingEnabled": false,
+    "minWebViewVersion": 110
+  }
+}

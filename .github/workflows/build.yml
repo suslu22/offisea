@@ -1,0 +1,194 @@
+# Offisea: web, Windows (EXE) ve Android (APK) sürümlerini GitHub üzerinde otomatik derler.
+# - main dalına her gönderimde web sürümü imzalanıp GitHub Pages'e yayınlanır; kurulu uygulamalar
+#   (Android, Windows, web) kendilerini buradan, yeni kurulum dosyası indirmeden günceller.
+# - "v1.2.3" gibi bir etiket gönderildiğinde APK ve EXE dosyaları GitHub Releases'a eklenir.
+# Güvenlik: tüm eylemler değişmez commit SHA'sı ile sabitlenir (etiket ele geçirme saldırılarına karşı),
+# iş akışı yalnızca okuma izniyle çalışır ve sırlar yalnızca gereken adıma verilir.
+name: Derle
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+# Dosyasız güncelleme: web, Windows ve Android aynı güncelleme adresini kullanır (update.config.json "url").
+# İsterseniz depo ayarlarında (Settings > Variables) OFFISEA_UPDATE_URL ile başka bir adres verebilirsiniz.
+env:
+  OFFISEA_UPDATE_URL: ${{ vars.OFFISEA_UPDATE_URL }}
+
+jobs:
+  web:
+    name: Web (PWA)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Tüm işler aynı derleme numarasını kullanır (commit zamanı): güncellemelerin sırası bununla belirlenir.
+      - name: Derleme numarası
+        shell: bash
+        run: echo "OFFISEA_BUILD=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - name: Bağımlılık güvenlik denetimi
+        run: npm audit --audit-level=high
+      - run: npm run build
+      # İmza anahtarı yalnızca bu adıma verilir. Anahtar yoksa güncelleme dosyası (update.json) üretilmez.
+      - name: Güncellemeyi imzala
+        env:
+          OFFISEA_UPDATE_KEY: ${{ secrets.OFFISEA_UPDATE_KEY }}
+        run: |
+          if [ -n "$OFFISEA_UPDATE_KEY" ]; then
+            npm run sign
+          else
+            echo "::notice::OFFISEA_UPDATE_KEY tanımlı değil; güncelleme imzalanmadı."
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offisea-web
+          path: dist/
+          if-no-files-found: error
+      # GitHub Pages için paket (yalnızca main dalı; imzalı güncelleme dosyası olmadan yayın yapılmaz).
+      - name: İmzalı güncelleme dosyasını denetle
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        run: |
+          if [ ! -s dist/update.json ]; then
+            echo "::error::update.json yok. OFFISEA_UPDATE_KEY sırrını ekleyin."
+            exit 1
+          fi
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        with:
+          path: dist/
+
+  # Güncelleme sunucusu: GitHub Pages. Yalnızca bu iş Pages'e yazma iznine sahiptir.
+  pages:
+    name: Güncellemeyi yayınla (GitHub Pages)
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: web
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1
+
+  windows:
+    name: Windows (EXE)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Tüm işler aynı derleme numarasını kullanır (commit zamanı): güncellemelerin sırası bununla belirlenir.
+      - name: Derleme numarası
+        shell: bash
+        run: echo "OFFISEA_BUILD=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      # Burada kurulum betikleri açık: Electron ikili dosyası bu adımda (resmî kaynaktan, sağlama toplamıyla) indirilir.
+      - run: npm ci
+      - run: npm run dist:win
+        env:
+          # Kod imzalama sertifikası varsa (isteğe bağlı) electron-builder bunları kullanır.
+          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offisea-windows
+          path: |
+            release/*.exe
+            release/*.blockmap
+          if-no-files-found: error
+
+  android:
+    name: Android (APK)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # Tüm işler aynı derleme numarasını kullanır (commit zamanı): güncellemelerin sırası bununla belirlenir.
+      - name: Derleme numarası
+        shell: bash
+        run: echo "OFFISEA_BUILD=$(git log -1 --format=%ct)" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: gradle
+      - run: npm ci --ignore-scripts
+      - run: npm run android:sync
+      - name: APK derle
+        working-directory: android
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          OFFISEA_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          OFFISEA_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          OFFISEA_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          OFFISEA_VERSION_CODE: ${{ github.run_number }}
+        run: |
+          chmod +x gradlew
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/offisea.p12"
+            export OFFISEA_KEYSTORE="$RUNNER_TEMP/offisea.p12"
+            ./gradlew --no-daemon assembleRelease
+            mkdir -p ../out && cp app/build/outputs/apk/release/*.apk ../out/Offisea.apk
+            rm -f "$RUNNER_TEMP/offisea.p12"
+          else
+            echo "::notice::İmza anahtarı tanımlı değil; test için hata ayıklama imzalı APK üretiliyor."
+            ./gradlew --no-daemon assembleDebug
+            mkdir -p ../out && cp app/build/outputs/apk/debug/*.apk ../out/Offisea-test.apk
+          fi
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: offisea-android
+          path: out/*.apk
+          if-no-files-found: error
+
+  # Sürüm etiketi (v*) gönderildiğinde kurulum dosyaları GitHub Releases'a eklenir.
+  # Yalnızca bu iş depoya yazma iznine sahiptir; dış eylem yerine GitHub'ın kendi gh aracı kullanılır.
+  release:
+    name: Sürüm yayınla (Releases)
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, android]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: out
+          merge-multiple: true
+      - name: Releases'a yükle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          ls -la out
+          gh release create "$GITHUB_REF_NAME" out/*.apk out/*.exe --title "Offisea $GITHUB_REF_NAME" --generate-notes --verify-tag

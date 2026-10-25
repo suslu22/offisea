@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Offisea</string>
+    <string name="title_activity_main">Offisea</string>
+    <string name="package_name">app.offisea.office</string>
+    <string name="custom_url_scheme">app.offisea.office</string>
+</resources>
