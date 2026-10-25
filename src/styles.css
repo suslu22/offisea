@@ -879,6 +879,7 @@ body.dragging::after {
 .ann-sel-edit { right: 20px; }
 .ann-sel-grip { position: absolute; right: -11px; bottom: -11px; width: 22px; height: 22px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: var(--shadow); cursor: nwse-resize; }
 .annot-bar { display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--border); background: var(--surface); overflow-x: auto; scrollbar-width: none; }
+@media (pointer: fine) { .annot-bar { scrollbar-width: thin; } }
 .annot-bar::-webkit-scrollbar { display: none; }
 .annot-bar[hidden] { display: none; }
 .annot-opts { display: flex; align-items: center; gap: 6px; flex: none; }
@@ -888,6 +889,28 @@ body.dragging::after {
 .pen-w span { display: block; width: 100%; background: var(--text); border-radius: 3px; }
 .pen-w.on { border-color: var(--accent); background: var(--accent-soft); }
 .ann-textarea { width: 100%; min-height: 90px; resize: vertical; font: inherit; }
+.pdf-annot .ann-block { fill: rgba(56, 120, 230, 0.06); stroke: var(--accent); stroke-width: 1px; stroke-dasharray: 4 3; vector-effect: non-scaling-stroke; pointer-events: none; }
+.pdf-pages.annot-tedit .pdf-page { cursor: text; }
+.pdf-pages.annot-tedit .textLayer, .pdf-pages.annot-tedit .pdf-links, .pdf-pages.annot-tedit .pdf-form { pointer-events: none; }
+.ann-sel.ann-sel-fixed { cursor: default; }
+.ted-wrap { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
+.ted-cover { position: absolute; }
+.ted-input { position: absolute; pointer-events: auto; margin: 0; padding: 0; border: 0; border-radius: 0; outline: 1.5px dashed var(--accent); outline-offset: 2px; resize: none; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; box-sizing: content-box; letter-spacing: 0; word-spacing: 0; font-kerning: normal; color-scheme: light; }
+.tb-italic .tbtn-text { font-style: italic; font-family: Georgia, serif; }
+.tb-bold .tbtn-text { font-weight: 700; }
+.pdf-form { position: absolute; inset: 0; z-index: 2; pointer-events: none; }
+.pdf-field { position: absolute; box-sizing: border-box; margin: 0; pointer-events: auto; border: 1px solid rgba(40, 90, 200, 0.35); border-radius: 1px; background: #e9f0ff; color: #000; padding: 0 2px; font-family: Arial, "Liberation Sans", sans-serif; line-height: 1.15; color-scheme: light; }
+.pdf-field:focus { outline: 2px solid var(--accent); outline-offset: 0; background: #fff; }
+textarea.pdf-field { resize: none; padding: 1px 2px; overflow: auto; }
+.pdf-field-check { appearance: auto; padding: 0; accent-color: #1a3fa8; cursor: pointer; }
+.pdf-field-choice { padding: 0; }
+.pdf-pages.annot-drawing .pdf-form { pointer-events: none; }
+.pdf-pages.annot-drawing .pdf-field, .pdf-pages.annot-tedit .pdf-field { pointer-events: none; }
+.scan-ocr { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; font-size: 14px; cursor: pointer; user-select: none; }
+.scan-ocr input { width: 18px; height: 18px; accent-color: var(--accent); }
+.search-snippet { display: block; font-size: 12.5px; color: var(--text-2); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.search-snippet mark { background: rgba(255, 200, 0, 0.45); color: inherit; border-radius: 2px; padding: 0 1px; }
+.search-status { font-size: 12.5px; color: var(--text-2); margin: 0 0 6px; }
 /* İmza */
 .sig-body { display: flex; flex-direction: column; gap: 10px; }
 .sig-wrap { position: relative; border: 1px solid var(--border); border-radius: 12px; background: #fff; overflow: hidden; }

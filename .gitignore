@@ -8,6 +8,7 @@ dist/
 keys/
 node_modules/
 public/pdfjs/
+public/ocr/
 release/
 android/.gradle/
 android/build/

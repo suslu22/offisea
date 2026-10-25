@@ -21,3 +21,14 @@ for (const dir of ['cmaps', 'standard_fonts', 'iccs', 'wasm']) {
   });
 }
 console.log('pdf.js dosyaları kopyalandı (betik motoru hariç).');
+
+// Yazı tanıma (OCR): Tesseract çekirdeği (WebAssembly, SIMD) ve Türkçe dil verisi public/ocr altına.
+// Dosyalar uygulamayla birlikte gelir; tanıma sırasında internete bağlanılmaz.
+const ocrOut = join(root, 'public', 'ocr');
+rmSync(ocrOut, { recursive: true, force: true });
+mkdirSync(ocrOut, { recursive: true });
+const core = join(root, 'node_modules', 'tesseract.js-core');
+for (const f of ['tesseract-core-simd-lstm.js', 'tesseract-core-simd-lstm.wasm']) cpSync(join(core, f), join(ocrOut, f));
+cpSync(join(core, 'LICENSE'), join(ocrOut, 'LICENSE-tesseract.txt'));
+cpSync(join(root, 'node_modules', '@tesseract.js-data', 'tur', '4.0.0_best_int', 'tur.traineddata.gz'), join(ocrOut, 'tur.traineddata.bin'));
+console.log('Yazı tanıma dosyaları kopyalandı.');

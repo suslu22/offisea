@@ -21,11 +21,13 @@ const OPENABLE = /\.(docx|docm|dotx|dotm|odt|rtf|txt|md|html?|xlsx|xlsm|xltx|xlt
 const isDev = !app.isPackaged && process.env.OFFISEA_DEV === '1';
 
 const CSP = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'",
+  "default-src 'self'", "script-src 'self' 'wasm-unsafe-eval'", // yalnızca WebAssembly (yazı tanıma); eval() kapalı
+  "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:", "font-src 'self' data: blob:", "media-src 'self' data: blob:",
   "connect-src 'self' data: blob:", "worker-src 'self' blob:", "frame-src 'none'", "object-src 'none'",
   "base-uri 'none'", "form-action 'none'", "frame-ancestors 'none'",
 ].join('; ');
+const OCR_WORKER_CSP = "default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; connect-src 'self'";
 
 // Tek örnek: ikinci kez açılan Offisea, dosyayı mevcut pencereye iletir.
 if (!app.requestSingleInstanceLock()) {
@@ -83,6 +85,8 @@ function registerAppProtocol(ses) {
         'Referrer-Policy': 'no-referrer',
       });
       if (target.endsWith('.html')) headers.set('Content-Security-Policy', CSP);
+      // Yazı tanıma işçisi: yalnızca kendi dosyaları ve WebAssembly (eval() kapalı)
+      else if (path.basename(target) === 'ocr-worker.js') headers.set('Content-Security-Policy', OCR_WORKER_CSP);
       return new Response(body, { status: 200, headers });
     } catch {
       return new Response('Hata', { status: 500 });

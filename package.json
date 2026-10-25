@@ -1,7 +1,7 @@
 {
   "name": "offisea",
   "productName": "Offisea",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Ücretsiz, çevrimdışı çalışan ofis uygulaması: belge, tablo, sunum ve PDF.",
   "private": true,
   "type": "module",
@@ -26,6 +26,7 @@
     "release:web": "npm run build && npm run sign"
   },
   "devDependencies": {
+    "@cantoo/fontkit": "2.0.12",
     "@cantoo/pdf-lib": "2.11.1",
     "@capacitor/android": "^8.5.3",
     "@capacitor/app": "^8.1.2",
@@ -33,6 +34,7 @@
     "@capacitor/core": "^8.5.3",
     "@capacitor/filesystem": "^8.1.5",
     "@capacitor/share": "^8.0.3",
+    "@tesseract.js-data/tur": "1.0.0",
     "docx": "^9.14.0",
     "dompurify": "^3.4.17",
     "electron": "^45.0.0",
@@ -41,6 +43,7 @@
     "pdfjs-dist": "^6.4.299",
     "pptxgenjs": "^4.0.1",
     "sharp": "^0.35.5",
+    "tesseract.js-core": "7.0.0",
     "vite": "^8.3.5",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },

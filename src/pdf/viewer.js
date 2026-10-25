@@ -8,12 +8,25 @@ import { h, tbtn, tsep, tselect, toast, clear, modal, popupMenu, askText, confir
 import { saveBlob, printElement, canPrint, isSafeUrl, openExternal } from '../core/platform.js';
 import { LITE, canvasDpr } from '../core/perf.js';
 import { pinchZoom } from '../core/pinch.js';
-import { createAnnotator, cleanAnnots, renderLayerPng, drawItems } from './annotate.js';
+import { createAnnotator, cleanAnnots, renderLayerPng, drawItems, isVectorItem, teditLines, textLines } from './annotate.js';
+import { textBlocks, sampleColors, loadScreenFonts } from './textlayout.js';
 
 const loadTools = () => import('./tools.js');
 // Telefonlarda sayfa başına tuval belleği sınırlı tutulur; bellekte daha az sayfa kalır.
 const MAX_CANVAS_PIXELS = (LITE ? 6 : 16) * 1024 * 1024;
 const KEEP_PAGES = LITE ? 3 : 6;
+
+/** Saklanan form değerlerini doğrular. */
+function cleanForm(v) {
+  const out = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const [k, val] of Object.entries(v).slice(0, 3000)) {
+    const key = String(k).slice(0, 500);
+    if (typeof val === 'string') out[key] = val.slice(0, 20000);
+    else if (Array.isArray(val)) out[key] = val.filter((x) => typeof x === 'string').slice(0, 200).map((x) => x.slice(0, 2000));
+  }
+  return out;
+}
 
 async function askPassword(retry) {
   const input = h('input', { class: 'input', type: 'password', autocomplete: 'off', 'aria-label': 'PDF parolası' });
@@ -74,12 +87,63 @@ export async function mountPdf(root, data, app) {
     const canvasBox = h('div', { class: 'pdf-canvas-box' });
     const textBox = h('div', { class: 'textLayer' });
     const linkBox = h('div', { class: 'pdf-links' });
-    el.append(canvasBox, textBox, linkBox, h('div', { class: 'pdf-page-num' }, String(i)));
+    const formBox = h('div', { class: 'pdf-form' });
+    el.append(canvasBox, textBox, linkBox, formBox, h('div', { class: 'pdf-page-num' }, String(i)));
     pagesEl.append(el);
-    pages.push({ el, canvasBox, textBox, linkBox, num: i, vp1: i === 1 ? baseVp : null, page: i === 1 ? first : null, renderedScale: 0, task: null });
+    pages.push({ el, canvasBox, textBox, linkBox, formBox, num: i, vp1: i === 1 ? baseVp : null, page: i === 1 ? first : null, renderedScale: 0, task: null });
   }
 
-  // ---- Notlar (kalem, vurgulayıcı, metin, imza) --------------------------------------------------
+  // ---- Form alanları --------------------------------------------------------------------------
+  // Yalnızca kullanıcının değiştirdiği alanlar saklanır; kaydederken PDF'in form alanlarına yazılır.
+  const formValues = cleanForm(data.form);
+  const widgets = new Map(); // alan adı → Map(pdf.js açıklama kimliği → { type, exp })
+  let formHinted = false;
+  const storeOne = (id, f, value) => {
+    let v;
+    if (f.type === 'text') v = { value: Array.isArray(value) ? value[0] || '' : String(value) };
+    else if (f.type === 'check') v = { value: value === f.exp };
+    else v = { value: Array.isArray(value) ? value : [value] };
+    try { pdf.annotationStorage.setValue(id, v); } catch { /* yok say */ }
+  };
+  // Yazdırmada (pdf.js) girilen değerler görünsün diye pdf.js'in form deposuna da yazılır
+  function storeField(name, value) {
+    for (const [id, f] of widgets.get(name) || []) storeOne(id, f, value);
+  }
+  /** Sayfadaki form alanını tanır; doldurulabilir değilse null döner. */
+  function registerWidget(a) {
+    if (a.subtype !== 'Widget' || !a.fieldName || !a.rect || a.hidden || a.readOnly) return null;
+    let f = null;
+    if (a.fieldType === 'Tx') f = { type: 'text' };
+    else if (a.fieldType === 'Btn' && (a.checkBox || a.radioButton)) {
+      const exp = a.checkBox ? a.exportValue : a.buttonValue;
+      if (exp != null) f = { type: 'check', exp: String(exp) };
+    } else if (a.fieldType === 'Ch' && Array.isArray(a.options)) f = { type: 'choice' };
+    if (!f) return null;
+    if (!widgets.has(a.fieldName)) widgets.set(a.fieldName, new Map());
+    if (!widgets.get(a.fieldName).has(a.id)) {
+      widgets.get(a.fieldName).set(a.id, f);
+      if (Object.prototype.hasOwnProperty.call(formValues, a.fieldName)) storeOne(a.id, f, formValues[a.fieldName]);
+    }
+    return f;
+  }
+  async function registerPageWidgets(pg) {
+    try { for (const a of await pg.getAnnotations({ intent: 'display' })) registerWidget(a); } catch { /* yok say */ }
+  }
+  function setField(name, value, from) {
+    formValues[name] = value;
+    data.form = { ...formValues };
+    storeField(name, value);
+    // Aynı adlı diğer alanlar (başka sayfalarda da olabilir) eşitlenir
+    for (const el of pagesEl.querySelectorAll('.pdf-field')) {
+      if (el === from || el.dataset.field !== name) continue;
+      if (el.type === 'checkbox' || el.type === 'radio') el.checked = value === el.value;
+      else if (el.multiple) for (const o of el.options) o.selected = value.includes(o.value);
+      else el.value = Array.isArray(value) ? value[0] || '' : value;
+    }
+    app.markDirty();
+  }
+
+  // ---- Notlar (kalem, vurgulayıcı, metin, imza, yazı düzenleme) ------------------------------------
   const annot = createAnnotator({
     pages, pagesEl,
     getSize: (p) => p.vp1 || baseVp,
@@ -87,6 +151,17 @@ export async function mountPdf(root, data, app) {
     initial: cleanAnnots(data.annots, n),
     onChange: (items) => { data.annots = items; app.markDirty(); },
     readOnlyReason: () => null,
+    getBlocks: async (p) => {
+      if (!p.page) p.page = await pdf.getPage(p.num);
+      await loadScreenFonts(); // blok boyutları bu yazı tipleriyle ölçülür
+      const tc = await p.page.getTextContent();
+      return textBlocks(tc, p.vp1 || p.page.getViewport({ scale: 1 }), p.page.commonObjs);
+    },
+    colorsAt: (p, rect) => {
+      const c = p.canvasBox.querySelector('canvas');
+      const vp = p.vp1 || baseVp;
+      return sampleColors(c, rect, c ? c.width / vp.width : 1);
+    },
   });
   toolbar.after(annot.bar);
 
@@ -157,9 +232,11 @@ export async function mountPdf(root, data, app) {
 
   async function renderLinks(p, vp) {
     clear(p.linkBox);
+    clear(p.formBox);
     let annots = [];
     try { annots = await p.page.getAnnotations({ intent: 'display' }); } catch { return; }
     for (const a of annots) {
+      if (a.subtype === 'Widget') { formField(p, vp, a); continue; }
       if (a.subtype !== 'Link' || !a.rect) continue;
       const [x1, y1] = vp.convertToViewportPoint(a.rect[0], a.rect[1]);
       const [x2, y2] = vp.convertToViewportPoint(a.rect[2], a.rect[3]);
@@ -187,10 +264,62 @@ export async function mountPdf(root, data, app) {
     }
   }
 
+  // Form alanının üstüne aynı yerde düzenlenebilir bir HTML alanı konur
+  function formField(p, vp, a) {
+    if (!registerWidget(a)) return;
+    if (!formHinted) {
+      formHinted = true;
+      toast('Bu PDF doldurulabilir form alanları içeriyor. Alanlara dokunarak doldurabilirsiniz.', { timeout: 5000 });
+    }
+    const [x1, y1] = vp.convertToViewportPoint(a.rect[0], a.rect[1]);
+    const [x2, y2] = vp.convertToViewportPoint(a.rect[2], a.rect[3]);
+    const left = Math.min(x1, x2), top = Math.min(y1, y2), w = Math.abs(x2 - x1), hh = Math.abs(y2 - y1);
+    if (w < 2 || hh < 2) return;
+    const name = a.fieldName;
+    const has = Object.prototype.hasOwnProperty.call(formValues, name);
+    const val = has ? formValues[name] : a.fieldValue;
+    const da = a.defaultAppearanceData && a.defaultAppearanceData.fontSize > 0 ? a.defaultAppearanceData.fontSize * vp.scale : 0;
+    const label = String(a.alternativeText || name).slice(0, 120);
+    let el;
+    if (a.fieldType === 'Tx') {
+      el = h(a.multiLine ? 'textarea' : 'input', { class: 'pdf-field pdf-field-text', 'aria-label': label, title: label, spellcheck: 'false', autocomplete: 'off' });
+      if (!a.multiLine) el.type = 'text';
+      if (a.maxLen > 0) el.maxLength = a.maxLen;
+      el.value = Array.isArray(val) ? val[0] || '' : val == null ? '' : String(val);
+      el.style.fontSize = (da || (a.multiLine ? 10 * vp.scale : Math.min(hh * 0.62, 12 * vp.scale))) + 'px';
+      el.style.textAlign = ['left', 'center', 'right'][a.textAlignment] || 'left';
+      el.addEventListener('input', () => setField(name, el.value, el));
+    } else if (a.fieldType === 'Btn' && (a.checkBox || a.radioButton)) {
+      const exp = a.checkBox ? a.exportValue : a.buttonValue;
+      if (exp == null) return;
+      el = h('input', { class: 'pdf-field pdf-field-check', type: a.checkBox ? 'checkbox' : 'radio', 'aria-label': label, title: label, value: String(exp) });
+      if (a.radioButton) el.name = 'pdfr-' + name;
+      el.checked = String(val) === String(exp);
+      el.addEventListener('change', () => {
+        if (a.radioButton) { if (el.checked) setField(name, String(exp), el); } else setField(name, el.checked ? String(exp) : 'Off', el);
+      });
+    } else if (a.fieldType === 'Ch' && Array.isArray(a.options)) {
+      el = h('select', { class: 'pdf-field pdf-field-choice', 'aria-label': label, title: label });
+      if (!a.combo) { el.multiple = !!a.multiSelect; el.size = Math.max(2, Math.min(a.options.length, Math.floor(hh / 14) || 2)); }
+      const cur = Array.isArray(val) ? val.map(String) : val == null ? [] : [String(val)];
+      if (a.combo && !cur.length) el.append(h('option', { value: '' }, ''));
+      for (const o of a.options) {
+        const opt = h('option', { value: String(o.exportValue) }, String(o.displayValue == null ? o.exportValue : o.displayValue));
+        opt.selected = cur.includes(String(o.exportValue));
+        el.append(opt);
+      }
+      el.style.fontSize = (da || Math.min(hh * 0.62, 12 * vp.scale)) + 'px';
+      el.addEventListener('change', () => setField(name, el.multiple ? [...el.selectedOptions].map((o) => o.value) : [el.value], el));
+    } else return;
+    el.dataset.field = name;
+    Object.assign(el.style, { left: left + 'px', top: top + 'px', width: w + 'px', height: hh + 'px' });
+    p.formBox.append(el);
+  }
+
   function unrender(p) {
     if (p.task) { p.task.cancel(); p.task = null; }
     if (p.renderedScale) {
-      clear(p.canvasBox); clear(p.textBox); clear(p.linkBox);
+      clear(p.canvasBox); clear(p.textBox); clear(p.linkBox); clear(p.formBox);
       p.renderedScale = 0;
     }
   }
@@ -329,6 +458,7 @@ export async function mountPdf(root, data, app) {
     try {
       for (let i = 1; i <= n; i++) {
         const pg = await pdf.getPage(i);
+        await registerPageWidgets(pg);
         const vp = pg.getViewport({ scale: 150 / 72 });
         const c = document.createElement('canvas');
         c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
@@ -360,7 +490,7 @@ export async function mountPdf(root, data, app) {
     const hasJs = await pdf.getJSActions().then((a) => a && Object.keys(a).length > 0).catch(() => false);
     const note = h('p', { class: 'muted' }, hasJs
       ? 'Bu PDF gömülü JavaScript içeriyor. Offisea güvenlik nedeniyle PDF içindeki betikleri asla çalıştırmaz.'
-      : 'Offisea PDF içindeki betikleri ve formları çalıştırmaz; dosya yalnızca görüntülenir.');
+      : 'Offisea PDF içindeki betikleri (JavaScript) hiçbir zaman çalıştırmaz.');
     modal({ title: 'Belge bilgileri', body: h('div', null, tbl, note) });
   }
 
@@ -370,17 +500,43 @@ export async function mountPdf(root, data, app) {
     if (p.vp1) return p.vp1;
     return (await pdf.getPage(idx + 1)).getViewport({ scale: 1 });
   }
-  /** Notlar sayfalara işlenmiş PDF baytları (not yoksa dosyanın kendisi). */
+  const needsBake = () => annot.items().length > 0 || Object.keys(formValues).length > 0;
+  /** Notlar, yazı düzenlemeleri ve form değerleri işlenmiş PDF baytları (yoksa dosyanın kendisi). */
   async function outputBytes() {
+    annot.flush();
     const items = annot.items();
-    if (!items.length) return new Uint8Array(bytes);
+    if (!needsBake()) return new Uint8Array(bytes);
     const tools = await loadTools();
-    const layers = new Map();
+    if (items.some(isVectorItem)) await loadScreenFonts();
+    const plans = new Map();
     for (const idx of [...new Set(items.map((i) => i.p))]) {
       const vp = await pageSize(idx);
-      layers.set(idx, await renderLayerPng(items.filter((i) => i.p === idx), vp.width, vp.height));
+      const its = items.filter((i) => i.p === idx);
+      const raster = its.filter((i) => !isVectorItem(i));
+      const toUser = (x, y) => vp.convertToPdfPoint(x, y);
+      const urect = (r) => {
+        const pts = [toUser(r.x, r.y), toUser(r.x + r.w, r.y), toUser(r.x, r.y + r.h), toUser(r.x + r.w, r.y + r.h)];
+        const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+        return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      };
+      // Ekrandaki yatay yönün PDF'teki açısı (sayfa döndürülmüşse 90'ın katları)
+      const o = toUser(0, 0), ex = toUser(1, 0);
+      const angle = (Math.atan2(ex[1] - o[1], ex[0] - o[0]) * 180) / Math.PI;
+      const plan = { removes: [], texts: [], png: raster.length ? await renderLayerPng(raster, vp.width, vp.height) : null };
+      const conv = (lines) => lines.map((l) => ({ str: l.str, at: toUser(l.x, l.y) }));
+      for (const it of its) {
+        if (it.t === 'tedit') {
+          plan.removes.push({ rect: urect(it), bg: it.bg, oc: it.oc });
+          plan.texts.push({ family: it.ff, bold: it.b, italic: it.i, size: it.s, color: it.c, angle, lines: conv(teditLines(it)) });
+        } else if (it.t === 'text') {
+          plan.texts.push({ family: 'sans', bold: false, italic: false, size: it.s, color: it.c, angle, lines: conv(textLines(it)) });
+        }
+      }
+      plans.set(idx, plan);
     }
-    return tools.flattenLayers(bytes, layers, { password });
+    const r = await tools.bakeEdits(bytes, plans, { password, form: formValues });
+    if (r.warn) toast('Bazı yazılar dosyadan tamamen silinemedi; üzerleri örtüldü.', { timeout: 6000 });
+    return r.bytes;
   }
   async function work(text, fn) {
     const done = app.busy ? app.busy(text) : () => {};
@@ -391,6 +547,7 @@ export async function mountPdf(root, data, app) {
     } finally { done(); }
   }
   async function confirmBake() {
+    annot.flush();
     if (!annot.items().length) return true;
     return confirmBox('Notlar sayfaya işlenecek', 'Bu işlemden önce eklediğiniz notlar ve imzalar sayfalara kalıcı olarak işlenir (sonradan taşınamaz). Devam edilsin mi?', { okLabel: 'Devam et' });
   }
@@ -471,6 +628,112 @@ export async function mountPdf(root, data, app) {
     const buf = (await loadTools()).toBuffer(out);
     await app.createDoc({ kind: 'pdf', title: `${app.title ? app.title() : 'PDF'} (küçültülmüş)`, data: { bytes: buf }, size: buf.byteLength });
   }
+  // ---- Yazı tanıma (OCR) ------------------------------------------------------------------------
+  function progressOverlay(text) {
+    const msg = h('div', null, text);
+    let cancelled = false;
+    const cancel = h('button', { class: 'btn', type: 'button' }, 'İptal');
+    const el = h('div', { class: 'loading-overlay', role: 'status' }, h('div', { class: 'spinner' }), msg, cancel);
+    cancel.addEventListener('click', () => { cancelled = true; cancel.disabled = true; msg.textContent = 'İptal ediliyor…'; });
+    document.body.append(el);
+    return { set: (t) => { if (!cancelled) msg.textContent = t; }, cancelled: () => cancelled, close: () => el.remove() };
+  }
+  async function pagesWithoutText() {
+    const out = [];
+    for (let i = 1; i <= n; i++) if ((await pageText(i)).replace(/\s/g, '').length < 15) out.push(i);
+    return out;
+  }
+  async function runOcr() {
+    annot.flush();
+    let list = await pagesWithoutText();
+    if (!list.length) {
+      const ok = await confirmBox('Yazılar zaten seçilebilir', 'Bu PDF’in sayfalarında seçilebilir yazı var. Yine de tüm sayfalarda yazı tanıma yapılsın mı? (Sayfalara ikinci, görünmez bir yazı katmanı eklenir.)', { okLabel: 'Yine de tanı' });
+      if (!ok) return;
+      list = pages.map((p) => p.num);
+    } else if (!(await confirmBox('Yazıları tanı (OCR)', `${list.length === n ? 'Tüm sayfalardaki' : list.length + ' sayfadaki'} yazılar bu cihazda tanınacak; sayfalara görünmez bir yazı katmanı eklenecek. Böylece metin seçilebilir, kopyalanabilir ve aranabilir olur. Görünüm değişmez. Belgeleriniz hiçbir yere gönderilmez.`, { okLabel: 'Başlat' }))) return;
+    if (!(await confirmBake())) return;
+    const pr = progressOverlay('Yazı tanıma hazırlanıyor…');
+    const layers = new Map();
+    let words = 0;
+    const ocr = await import('./ocr.js');
+    try {
+      for (let k = 0; k < list.length; k++) {
+        if (pr.cancelled()) break;
+        pr.set(`Yazılar tanınıyor… Sayfa ${k + 1} / ${list.length}`);
+        const pg = await pdf.getPage(list[k]);
+        const vp1 = pg.getViewport({ scale: 1 });
+        let s = 300 / 72;
+        const maxPx = (LITE ? 6 : 10) * 1e6;
+        if (vp1.width * vp1.height * s * s > maxPx) s = Math.sqrt(maxPx / (vp1.width * vp1.height));
+        const vp = pg.getViewport({ scale: s });
+        const c = document.createElement('canvas');
+        c.width = Math.ceil(vp.width); c.height = Math.ceil(vp.height);
+        const ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, c.width, c.height);
+        await pg.render({ canvas: c, viewport: vp, intent: 'print' }).promise;
+        const r = await ocr.recognize(c);
+        c.width = c.height = 0;
+        const toUser = (x, y) => vp1.convertToPdfPoint(x, y);
+        const o = toUser(0, 0), ex = toUser(1, 0);
+        const angle = (Math.atan2(ex[1] - o[1], ex[0] - o[0]) * 180) / Math.PI;
+        const ws = ocr.layoutWords(r.words, 1 / s, toUser, angle);
+        if (ws.length) { layers.set(list[k] - 1, ws); words += ws.length; }
+      }
+      if (pr.cancelled() && !layers.size) return;
+      if (!layers.size) { toast('Sayfalarda tanınabilir yazı bulunamadı.', { timeout: 5000 }); return; }
+      pr.set('Yazılar PDF’e ekleniyor…');
+      const tools = await loadTools();
+      const out = await tools.addOcrLayers(await outputBytes(), layers, { password });
+      await replaceBytes(out, `${layers.size} sayfada yazılar tanındı (${words} kelime). Artık metin seçilebilir ve aranabilir.`);
+    } catch (err) {
+      console.error(err);
+      toast((err && err.message) || 'Yazı tanıma başarısız.', { type: 'error', timeout: 7000 });
+    } finally {
+      pr.close();
+      ocr.stopOcr();
+    }
+  }
+
+  // ---- Word belgesine dönüştürme ------------------------------------------------------------------
+  async function toWord() {
+    const esc = (t) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const done = app.busy ? app.busy('Word belgesine dönüştürülüyor…') : () => {};
+    try {
+      const all = [];
+      let chars = 0;
+      for (let i = 1; i <= n; i++) {
+        const pg = await pdf.getPage(i);
+        const tc = await pg.getTextContent();
+        all.push(textBlocks(tc, pg.getViewport({ scale: 1 }), null).sort((a, b) => (Math.abs(a.y - b.y) < 4 ? a.x - b.x : a.y - b.y)));
+      }
+      // Başlıklar belgenin olağan yazı boyutuna göre seçilir (en çok yazının kullandığı boyut)
+      const bySize = new Map();
+      for (const b of all.flat()) bySize.set(Math.round(b.s), (bySize.get(Math.round(b.s)) || 0) + b.text.length);
+      const body = [...bySize].sort((a, b) => b[1] - a[1])[0]?.[0] || 11;
+      const parts = [];
+      all.forEach((blocks, i) => {
+        for (const b of blocks) {
+          const big = b.s >= body * 1.3 && b.text.length < 150;
+          const lvl = b.s >= body * 1.7 ? 1 : 2;
+          const inner = esc(b.text).replace(/\n/g, '<br>');
+          const styled = b.b && !big ? `<strong>${inner}</strong>` : inner;
+          parts.push(big ? `<h${lvl}>${inner}</h${lvl}>` : `<p>${styled}</p>`);
+          chars += b.text.length;
+        }
+        if (i < all.length - 1) parts.push('<hr>');
+      });
+      if (chars < 20) {
+        toast('Bu PDF’te dönüştürülecek yazı bulunamadı. Taranmış bir belgeyse önce “Yazıları tanı (OCR)”yı kullanın.', { timeout: 7000 });
+        return;
+      }
+      await app.createDoc({ kind: 'word', title: `${app.title ? app.title() : 'PDF'}`, data: { html: parts.join('\n') } });
+    } catch (err) {
+      console.error(err);
+      toast('Dönüştürülemedi.', { type: 'error' });
+    } finally { done(); }
+  }
+
   function pageMenu(anchor) {
     const cp = currentPage();
     popupMenu(anchor, [
@@ -485,11 +748,14 @@ export async function mountPdf(root, data, app) {
       n > 1 ? { label: 'Sayfaları sil…', icon: 'trash', onClick: deleteRange } : null,
       { label: 'Sona başka PDF ekle…', icon: 'plus', onClick: appendFiles },
       { label: 'PDF’i küçült…', icon: 'compress', onClick: compress },
+      { label: 'Yazıları tanı (OCR)…', icon: 'search', onClick: runOcr },
+      { label: 'Word belgesine dönüştür', icon: 'doc', onClick: toWord },
     ], { minWidth: 250 });
   }
   async function savePdf(title) {
-    if (!annot.items().length) { saveBlob(new Blob([bytes], { type: 'application/pdf' }), `${title}.pdf`); return; }
-    const out = await work('Notlar PDF’e işleniyor…', () => outputBytes());
+    annot.flush();
+    if (!needsBake()) { saveBlob(new Blob([bytes], { type: 'application/pdf' }), `${title}.pdf`); return; }
+    const out = await work('Değişiklikler PDF’e işleniyor…', () => outputBytes());
     if (out) saveBlob(new Blob([out], { type: 'application/pdf' }), `${title}.pdf`);
   }
 
@@ -512,7 +778,7 @@ export async function mountPdf(root, data, app) {
     zoomSel,
     tbtn('zoomIn', 'Yakınlaştır', () => zoomStep(1)),
     tsep(),
-    tbtn('pen', 'Not ekle ve imzala', () => annot.toggleBar(!annot.isOpen()), { text: 'Düzenle', cls: 'tb-wide' }),
+    tbtn('pen', 'Düzenle: yazıları değiştir, not ekle, imzala', () => annot.toggleBar(!annot.isOpen()), { text: 'Düzenle', cls: 'tb-wide' }),
     tbtn('pages', 'Sayfa işlemleri', (e, b) => pageMenu(b), { text: 'Sayfalar', cls: 'tb-wide' }),
     tsep(),
     tbtn('search', 'Ara (Ctrl+F)', openFind),
@@ -570,6 +836,13 @@ export async function mountPdf(root, data, app) {
   layout();
   annot.refreshAll();
   status.textContent = `Sayfa 1 / ${n}`;
+  if (n <= 60) {
+    // Yazısı olmayan (taranmış) PDF'lerde yazı tanıma önerilir
+    pagesWithoutText().then((l) => {
+      if (destroyed || l.length < Math.max(1, n * 0.6)) return;
+      toast('Bu PDF’teki yazılar seçilemiyor (taranmış olabilir).', { timeout: 8000, action: { label: 'Yazıları tanı', onClick: runOcr } });
+    }).catch(() => {});
+  }
   if (data.lastPage > 1 && data.lastPage <= n) requestAnimationFrame(() => gotoPage(data.lastPage));
   setTimeout(() => scroller.focus({ preventScroll: true }), 50);
 
@@ -578,11 +851,13 @@ export async function mountPdf(root, data, app) {
       if (!findBar.hidden) { findBar.hidden = true; return true; }
       return annot.back();
     },
-    serialize: () => ({ bytes, annots: annot.items(), lastPage: currentPage() }),
+    serialize: () => ({ bytes, annots: annot.items(), form: { ...formValues }, lastPage: currentPage() }),
     primaryExport: { label: 'PDF dosyasını kaydet', run: (title) => savePdf(title) },
     fileMenu: (title) => [
       { label: 'PDF dosyasını kaydet', icon: 'download', onClick: () => savePdf(title()) },
-      { label: 'Not ekle ve imzala', icon: 'signature', onClick: () => annot.toggleBar(true) },
+      { label: 'Yazıları düzenle, not ekle ve imzala', icon: 'signature', onClick: () => annot.toggleBar(true) },
+      { label: 'Yazıları tanı (OCR)…', icon: 'search', onClick: runOcr },
+      { label: 'Word belgesine dönüştür', icon: 'doc', onClick: toWord },
       { label: 'Sayfa işlemleri…', icon: 'pages', onClick: () => setTimeout(() => pageMenu(toolbar), 0) },
       canPrint() ? { label: 'Yazdır', icon: 'print', hint: 'Ctrl+P', onClick: doPrint } : null,
       { label: 'Metni dışa aktar (.txt)', icon: 'download', onClick: async () => {

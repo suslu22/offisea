@@ -20,7 +20,9 @@ Her üç sürüm de aynı özelliklere sahiptir.
 - **Belge (Word):** `.docx`, `.odt`, `.rtf`, `.txt`, `.md`, `.html` açar; `.docx`, `.html`, `.txt` olarak kaydeder, PDF olarak yazdırır. Başlıklar, yazı tipi ve renkler, listeler, tablolar, resimler, bağlantılar, bul-değiştir, sayfa yazdırma.
 - **Tablo (Excel):** `.xlsx`, `.xlsm`, `.xls`, `.xlsb`, `.ods`, `.csv`, `.tsv` açar; `.xlsx`, `.ods`, `.csv` olarak kaydeder, PDF olarak yazdırır. Çok sayfa, 100'den fazla formül (Türkçe adlarıyla da: `TOPLA`, `EĞER`, `DÜŞEYARA`…), biçimlendirme, sıralama, birleştirilmiş hücreler, sabitlenmiş satır/sütun.
 - **Sunu (PowerPoint):** `.pptx`, `.ppsx`, `.potx` açar; `.pptx` olarak kaydeder, PDF olarak yazdırır. Metin kutuları, şekiller, resimler, tablolar, konuşmacı notları, tam ekran slayt gösterisi.
-- **PDF görüntüleyici:** Metin seçme ve arama, yakınlaştırma, bağlantılar, yazdırma.
+- **PDF:** Metin seçme ve arama, yakınlaştırma, bağlantılar, yazdırma. **Yazıları Word'deki gibi düzenleme**: PDF'teki bir yazıya dokunup değiştirin, silin, yazı tipini, boyutunu, rengini, kalın/italik ayarını değiştirin; kaydedince eski yazı dosyadan gerçekten silinir ve yenisi seçilebilir yazı olarak yazılır (Türkçe karakterler dahil). **Form doldurma** (metin, onay kutusu, seçenek, liste), not, vurgu ve imza ekleme, sayfa döndürme/silme/çıkarma, PDF birleştirme ve küçültme, **Word belgesine dönüştürme**.
+- **Yazı tanıma (OCR), tamamen çevrimdışı:** Taranmış PDF'lerdeki ve belge tarayıcıyla çekilen sayfalardaki yazılar cihazda tanınır (Türkçe); metin seçilebilir, aranabilir ve düzenlenebilir olur. Hiçbir şey internete gönderilmez.
+- **Belge içeriğinde arama:** Ana sayfadaki arama kutusu belge adlarının yanında Word, Excel, sunu ve PDF belgelerinin içindeki yazıları da arar; eşleşen yer önizlemeyle gösterilir. Arama dizini yalnızca bu cihazda tutulur.
 - **PDF olarak kaydetme / yazdırma** her sürümde vardır: web ve Windows'ta yazdırma penceresi, Android'de sistemin yazdırma ekranı ("PDF olarak kaydet" seçeneğiyle) açılır.
 - Otomatik kaydetme (belgeler yalnızca bu cihazda tutulur), son belgeler listesi, açık/koyu tema, dokunmatik ve klavye kullanımı.
 - **Deniz camı görünümü:** Üst çubuk, menüler, pencereler ve bildirimlerde buzlu cam efekti; kenarlarda dalga renklerinde ince bir parıltı. Bulanıklık yalnızca küçük, sabit yüzeylerde kullanılır (kaydırılan içerikte asla) ve telefonlarda daha hafif uygulanır. Zayıf cihazlarda (az bellek, 4 veya daha az çekirdek, veri tasarrufu, sistemde "şeffaflığı azalt") ya da açılıştaki kısa akıcılık ölçümünde zorlanan cihazlarda kendiliğinden kapanır. "Ayarlar ve hakkında" penceresinden açılıp kapatılabilir.
@@ -36,7 +38,8 @@ Uygulama, belge açan yazılımlarda sık görülen ve son dönemde gündeme gel
 | Tehdit | Önlem |
 |---|---|
 | Makro virüsleri, gömülü OLE nesneleri | VBA makroları ve OLE nesneleri hiçbir zaman çalıştırılmaz. |
-| Kötü amaçlı PDF (PDF içi JavaScript, XFA formları, pdf.js açıkları) | Güncel pdf.js 6; `isEvalSupported` ve XFA kapalı, JavaScript motoru dosyaları pakete hiç eklenmez. |
+| Kötü amaçlı PDF (PDF içi JavaScript, XFA formları, pdf.js açıkları) | Güncel pdf.js 6; `isEvalSupported` ve XFA kapalı, JavaScript motoru dosyaları pakete hiç eklenmez. Form alanlarındaki betikler (hesaplama, doğrulama) hiçbir zaman çalıştırılmaz; doldurulan PDF'ten eski XFA verisi silinir. |
+| Yazı tanıma | Tesseract WebAssembly olarak ayrı bir işçide, yalnızca uygulamanın kendi dosyalarıyla çalışır; CSP yalnızca WebAssembly derlemeye izin verir (`'wasm-unsafe-eval'`), `eval()` kapalı kalır. |
 | Belge içinden betik çalıştırma (XSS) | Tüm içerik güncel DOMPurify ile temizlenir; sıkı İçerik Güvenlik Politikası (CSP) satır içi betiği ve dış bağlantıyı engeller. |
 | Uzak resim / şablon ile izleme ve Windows NTLM parola özeti sızıntısı | Belgelerdeki uzak adresler otomatik yüklenmez; CSP ve masaüstünde ağ filtresi tüm dış istekleri keser. |
 | ZIP bombası, dev dosyalar | Açılmış boyut ve dosya sayısı sınırlı; en fazla 150 MB dosya. |

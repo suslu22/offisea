@@ -46,7 +46,7 @@ const MIN_SHELL = 1;
 const NOT_IN_BUNDLE = new Set(['_headers', 'version.json', 'update.json', 'sw.js', 'indir/index.html', 'indir/indir.css', 'indir/indir.js']);
 // Service worker'ın kurulumda hemen indirdiği dosyalar; pdf.js yardımcıları (karakter haritaları,
 // yazı tipleri) ve belge yazı tipleri yalnızca gerektiğinde indirilir ve sonra önbellekte tutulur.
-const LAZY = /^pdfjs\/|\.woff2$|^fonts\//;
+const LAZY = /^pdfjs\/|\.woff2$|^fonts\/|^ocr\/|^pdf-fonts\//;
 
 function listFiles(dir) {
   const out = [];

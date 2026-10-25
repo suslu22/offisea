@@ -188,13 +188,14 @@ export async function renderHome(view, { openFile, createNew, openDoc, installPr
   // Belgeler
   const headTitle = h('h2', null, 'Son belgeler');
   const headTools = h('div', { class: 'recent-head-tools' });
-  const filter = h('input', { class: 'input recent-filter', type: 'search', placeholder: 'Belgelerde ara', 'aria-label': 'Belgelerde ara' });
+  const filter = h('input', { class: 'input recent-filter', type: 'search', placeholder: 'Belgelerde ara (ad ve içerik)', 'aria-label': 'Belgelerde ara (ad ve içerik)' });
+  const searchNote = h('p', { class: 'search-status', hidden: true, role: 'status' });
   headTools.append(filter);
   const recentHead = h('div', { class: 'recent-head' }, headTitle, headTools);
   const chips = h('div', { class: 'folder-chips', role: 'tablist', 'aria-label': 'Klasörler' });
   const note = h('p', { class: 'muted trash-note' });
   const list = h('div', { class: 'recent-list', role: 'list' });
-  const recent = h('section', { class: 'home-recent' }, recentHead, chips, note, list);
+  const recent = h('section', { class: 'home-recent' }, recentHead, chips, note, searchNote, list);
 
   const foot = h('footer', { class: 'home-foot' },
     icon('shield', 16),
@@ -320,7 +321,8 @@ export async function renderHome(view, { openFile, createNew, openDoc, installPr
       } }, 'Boşalt'));
     }
     const q = filter.value.trim().toLocaleLowerCase('tr');
-    const shown = pool.filter((d) => !q || (d.title || '').toLocaleLowerCase('tr').includes(q));
+    const hits = contentQ && contentQ === filter.value.trim() ? contentHits : null;
+    const shown = pool.filter((d) => !q || (d.title || '').toLocaleLowerCase('tr').includes(q) || (hits && hits.has(d.id)));
     if (!pool.length) {
       if (inTrash) list.append(h('div', { class: 'empty' }, h('p', null, 'Çöp kutusu boş.')));
       else if (homeView) list.append(h('div', { class: 'empty' }, h('p', null, 'Bu klasör boş.'), h('p', { class: 'muted' }, 'Burada yeni belge oluşturabilir ya da bir belgenin menüsünden “Klasöre taşı”yı seçebilirsiniz.')));
@@ -335,11 +337,14 @@ export async function renderHome(view, { openFile, createNew, openDoc, installPr
       const meta = inTrash
         ? `${k.label} · ${daysLeft(d.trashed)} gün sonra silinecek`
         : `${k.label}${fname ? ' · ' + fname : ''} · ${fmtDate(d.updated)}${d.size ? ' · ' + fmtSize(d.size) : ''}`;
+      const hit = q && hits ? hits.get(d.id) : null;
+      // Eşleşen içerik parçası: metin düğümleriyle kurulur (belge içeriği HTML olarak yorumlanmaz)
+      const snippet = hit ? h('span', { class: 'search-snippet' }, hit.before, h('mark', null, hit.match), hit.after) : null;
       const openBtn = h('button', { class: 'recent-open', type: 'button' },
         h('span', { class: `recent-icon kind-${d.kind}` }, icon(k.icon, 22)),
         h('span', { class: 'recent-text' },
           h('span', { class: 'recent-title' }, d.title || 'Adsız'),
-          h('span', { class: 'recent-meta' }, meta)));
+          h('span', { class: 'recent-meta' }, meta), snippet));
       openBtn.addEventListener('click', () => (inTrash ? trashMenu(openBtn, d) : openDoc(d.id)));
       const row = h('div', { class: 'recent-item' + (inTrash ? ' is-trashed' : ''), role: 'listitem' }, openBtn, more);
       more.addEventListener('click', () => (inTrash ? trashMenu(more, d) : docMenu(more, d)));
@@ -351,7 +356,35 @@ export async function renderHome(view, { openFile, createNew, openDoc, installPr
     if (list.isConnected) draw();
   };
   redrawHome = () => { if (list.isConnected) draw(); };
-  filter.addEventListener('input', draw);
+  // İçerikte arama: yazmayı bitirince belge metinleri (gerekirse önce dizinlenerek) taranır
+  let contentQ = '', contentHits = new Map(), searchTimer = 0, searchSeq = 0;
+  const runContentSearch = async () => {
+    const q = filter.value.trim();
+    const seq = ++searchSeq;
+    if (q.length < 2 || homeView === 'trash') { contentQ = ''; contentHits = new Map(); searchNote.hidden = true; return; }
+    try {
+      const s = await import('./search.js');
+      const pool = docs.filter((d) => !d.trashed);
+      if (await s.staleCount(pool)) {
+        searchNote.hidden = false;
+        searchNote.textContent = 'Belge içerikleri taranıyor…';
+        await s.updateIndex(pool, (i, n) => { if (n > 1) searchNote.textContent = `Belge içerikleri taranıyor… ${i} / ${n}`; });
+      }
+      if (seq !== searchSeq || filter.value.trim() !== q) return;
+      contentHits = await s.searchContent(q);
+      contentQ = q;
+      searchNote.hidden = true;
+      if (list.isConnected) draw();
+    } catch (e) {
+      console.warn(e);
+      searchNote.hidden = true;
+    }
+  };
+  filter.addEventListener('input', () => {
+    draw();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(runContentSearch, 300);
+  });
   if (!purged) { purged = true; try { await purgeTrash(); } catch (e) { console.warn(e); } }
   await refresh();
 }

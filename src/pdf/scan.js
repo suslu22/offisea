@@ -3,6 +3,7 @@
 // kodlandığı için konum (GPS/EXIF) bilgileri PDF'e geçmez.
 import { h, icon, clear, modal, toast } from '../core/ui.js';
 import { LITE } from '../core/perf.js';
+import { getPref, setPref } from '../core/storage.js';
 
 const MAX_SRC = LITE ? 2200 : 3000; // işlenecek fotoğrafın uzun kenarı
 const MAX_OUT = LITE ? 1700 : 2200; // taranmış sayfanın uzun kenarı
@@ -317,8 +318,13 @@ export async function scanDocument() {
     cancel.addEventListener('click', () => resolveFinal(null));
     footer.append(cancel);
     if (pages.length) {
+      // Yazı tanıma: taranan sayfadaki yazılar seçilebilir ve aranabilir olur (cihazda yapılır)
+      const cb = h('input', { type: 'checkbox' });
+      cb.checked = getPref('scanOcr', true);
+      cb.addEventListener('change', () => setPref('scanOcr', cb.checked));
+      footer.append(h('label', { class: 'scan-ocr', title: 'Yazılar bu cihazda tanınır; metin seçilebilir ve aranabilir olur.' }, cb, h('span', null, 'Yazıları tanı')));
       const fin = h('button', { class: 'btn btn-primary', type: 'button' }, `PDF oluştur (${pages.length} sayfa)`);
-      fin.addEventListener('click', finish);
+      fin.addEventListener('click', () => finish(cb.checked));
       footer.append(fin);
     }
   }
@@ -444,19 +450,43 @@ export async function scanDocument() {
     footer.append(back, add);
   }
 
-  async function finish() {
-    if (!pages.length) return;
-    const t = toast('PDF oluşturuluyor…', { timeout: 60000 });
+  let finishing = false;
+  async function finish(withOcr) {
+    if (!pages.length || finishing) return;
+    finishing = true;
+    const t = toast('PDF oluşturuluyor…', { timeout: 0 });
+    const msg = t.querySelector('span');
+    let ocrMod = null;
     try {
       const images = [];
       for (const pg of pages) images.push({ bytes: await toJpeg(pg.canvas, filter === 'doc' ? 0.8 : 0.85), w: pg.w, h: pg.h });
+      let ocr = null;
+      if (withOcr) {
+        try {
+          ocrMod = await import('./ocr.js');
+          ocr = [];
+          for (let i = 0; i < pages.length; i++) {
+            if (msg) msg.textContent = `Yazılar tanınıyor… Sayfa ${i + 1} / ${pages.length}`;
+            ocr.push((await ocrMod.recognize(pages[i].canvas)).words);
+          }
+        } catch (err) {
+          console.warn(err);
+          ocr = null;
+          toast('Yazılar tanınamadı; PDF yazı tanıma olmadan oluşturuldu. ' + ((err && err.message) || ''), { type: 'error', timeout: 7000 });
+        }
+      }
+      if (msg) msg.textContent = 'PDF oluşturuluyor…';
       const { imagesToPdf, toBuffer } = await import('./tools.js');
-      const u8 = await imagesToPdf(images);
+      const u8 = await imagesToPdf(images, { ocr });
       resolveFinal({ bytes: toBuffer(u8), pages: pages.length });
     } catch (err) {
       console.error(err);
       toast('PDF oluşturulamadı: ' + (err.message || err), { type: 'error' });
-    } finally { t.remove(); }
+    } finally {
+      finishing = false;
+      t.remove();
+      if (ocrMod) ocrMod.stopOcr();
+    }
   }
 
   showStart();

@@ -1,6 +1,6 @@
 // Belgeler yalnızca bu cihazda (IndexedDB) saklanır; hiçbir sunucuya gönderilmez.
 const DB_NAME = 'offisea';
-const DB_VERSION = 2; // 2: klasörler
+const DB_VERSION = 3; // 2: klasörler, 3: arama dizini
 let dbPromise = null;
 
 /** Çöp kutusundaki belgeler bu kadar gün sonra kendiliğinden kalıcı olarak silinir. */
@@ -15,8 +15,15 @@ function openDb() {
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('data')) db.createObjectStore('data', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('folders')) db.createObjectStore('folders', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('text')) db.createObjectStore('text', { keyPath: 'id' });
     };
-    req.onsuccess = () => resolve(req.result);
+    // Başka bir sekmede yeni sürüm açılırsa bu bağlantı kapatılır (yükseltme beklemede kalmasın)
+    req.onblocked = () => {};
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onversionchange = () => { db.close(); dbPromise = null; };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error);
   });
   return dbPromise;
@@ -101,10 +108,32 @@ export async function listDocs() {
 /** Kalıcı olarak siler. */
 export async function deleteDoc(id) {
   const db = await openDb();
-  await tx(db, ['meta', 'data'], 'readwrite', (t) => {
+  await tx(db, ['meta', 'data', 'text'], 'readwrite', (t) => {
     t.objectStore('meta').delete(id);
     t.objectStore('data').delete(id);
+    t.objectStore('text').delete(id);
   });
+}
+
+// ---- Arama dizini (belge içeriğinin düz metni; yalnızca bu cihazda) ------------------------------
+/** Tüm dizin kayıtları: [{ id, u (belgenin dizinlendiği sürümün tarihi), t (metin) }] */
+export async function listTextIndex() {
+  const db = await openDb();
+  let all = [];
+  await tx(db, ['text'], 'readonly', (t) => {
+    t.objectStore('text').getAll().onsuccess = (e) => { all = e.target.result || []; };
+  });
+  return all;
+}
+
+export async function putTextIndex(rec) {
+  const db = await openDb();
+  await tx(db, ['text'], 'readwrite', (t) => { t.objectStore('text').put(rec); });
+}
+
+export async function deleteTextIndex(id) {
+  const db = await openDb();
+  await tx(db, ['text'], 'readwrite', (t) => { t.objectStore('text').delete(id); });
 }
 
 export const trashDoc = (id) => updateMeta(id, { trashed: Date.now() });
