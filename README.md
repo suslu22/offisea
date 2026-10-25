@@ -3,7 +3,7 @@
 <img src="public/icons/icon.svg" width="96" alt="Offisea logosu" align="right">
 
 - **Web sürümü:** https://suslu22.github.io/offisea/
-- **Android (APK) ve Windows (EXE) indir:** [Releases](https://github.com/suslu22/offisea/releases/latest)
+- **Android (APK) ve Windows (EXE) indir:** https://suslu22.github.io/offisea/indir/ ([Releases](https://github.com/suslu22/offisea/releases/latest))
 
 Ücretsiz, reklamsız ve çevrimdışı çalışan ofis uygulaması. Tek kod tabanından üç sürüm çıkar:
 

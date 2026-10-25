@@ -43,7 +43,7 @@ const BUILD = Number(process.env.OFFISEA_BUILD) || Math.floor(Date.now() / 1000)
 const MIN_SHELL = 1;
 
 // Paket listesine girmeyen dosyalar: sunucu ayarı, sürüm bilgisinin kendisi ve imzası.
-const NOT_IN_BUNDLE = new Set(['_headers', 'version.json', 'update.json', 'sw.js']);
+const NOT_IN_BUNDLE = new Set(['_headers', 'version.json', 'update.json', 'sw.js', 'indir/index.html', 'indir/indir.css', 'indir/indir.js']);
 // Service worker'ın kurulumda hemen indirdiği dosyalar; pdf.js yardımcıları (karakter haritaları,
 // yazı tipleri) yalnızca gerektiğinde indirilir ve sonra önbellekte tutulur.
 const LAZY = /^pdfjs\//;
@@ -119,6 +119,9 @@ self.addEventListener('fetch', (e) => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return;
   if (req.mode === 'navigate') {
+    // Uygulama dışındaki ayrı sayfalar (ör. indir/) her zaman sunucudan gelir.
+    const np = rel(url.href);
+    if (np != null && np !== '' && np !== 'index.html') return;
     e.respondWith(caches.open(CACHE).then((c) => c.match(base + 'index.html')).then((hit) => hit || fetch(req)));
     return;
   }
