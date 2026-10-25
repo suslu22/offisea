@@ -1,4 +1,5 @@
 // Offisea uygulama kabuğu: yönlendirme, üst çubuk, dosya açma, otomatik kayıt.
+import './fonts.css';
 import './styles.css';
 import { h, icon, clear, debounce, toast, popupMenu, closeMenus, tbtn } from './core/ui.js';
 import { saveDoc, loadDoc, newId, getPref, setPref } from './core/storage.js';

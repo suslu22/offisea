@@ -470,7 +470,7 @@ body.dragging::after {
 .home-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 28px; font-size: 13px; color: var(--text-2); }
 
 /* ---- Belge (Word) ---------------------------------------------------------------------------- */
-.doc-scroller { flex: 1; overflow: auto; min-height: 0; -webkit-overflow-scrolling: touch; }
+.doc-scroller { flex: 1; overflow: auto; min-height: 0; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
 .page-wrap { padding: 28px 20px 60px; display: flex; justify-content: center; min-width: min-content; }
 .page, .print-doc {
   font-family: Calibri, Carlito, "Segoe UI", Arial, sans-serif;
@@ -574,6 +574,11 @@ body.dragging::after {
   touch-action: none;
 }
 .ac-box { min-width: 220px; max-height: 240px; }
+.sheet-zoom {
+  flex: none; border: 0; background: transparent; color: var(--text-2, inherit); font: inherit; font-size: 12px;
+  padding: 0 10px; min-width: 52px; cursor: pointer; border-radius: 6px;
+}
+.sheet-zoom:hover { background: var(--hover, rgba(127, 127, 127, 0.15)); }
 .sheet-bottom {
   flex: none;
   display: flex;
@@ -649,7 +654,7 @@ body.dragging::after {
 }
 .thumb-add:hover { border-color: var(--accent); color: var(--accent); }
 .slides-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
-.stage-wrap { flex: 1; min-height: 0; overflow: hidden; display: flex; padding: 28px; outline: none; }
+.stage-wrap { flex: 1; min-height: 0; overflow: hidden; display: flex; padding: 28px; outline: none; touch-action: pan-x pan-y; }
 .stage-wrap.zoomed { overflow: auto; }
 .stage-host { position: relative; margin: auto; flex: none; }
 .slide-notes {
@@ -810,7 +815,7 @@ body.dragging::after {
 .show-end { color: #ccc; font-size: 18px; padding: 20px; text-align: center; }
 
 /* ---- PDF ------------------------------------------------------------------------------------- */
-.pdf-scroller { flex: 1; min-height: 0; overflow: auto; outline: none; -webkit-overflow-scrolling: touch; }
+.pdf-scroller { flex: 1; min-height: 0; overflow: auto; outline: none; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; }
 .pdf-pages { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 18px 12px 40px; min-width: min-content; }
 .pdf-page { position: relative; flex: none; background: #fff; box-shadow: 0 1px 5px rgba(0, 0, 0, 0.2); color-scheme: light; }
 .pdf-canvas-box { position: absolute; inset: 0; overflow: hidden; }

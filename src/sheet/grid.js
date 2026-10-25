@@ -2,6 +2,8 @@
 import { h, tbtn, tsep, tselect, popupMenu, colorPicker, askText, confirmBox, toast, clear, icon, modal } from '../core/ui.js';
 import { saveBlob, printElement, canPrint } from '../core/platform.js';
 import { canvasDpr } from '../core/perf.js';
+import { usableFonts, previewFontOptions, ensureCanvasFont } from '../core/fonts.js';
+import { pinchZoom } from '../core/pinch.js';
 import { Workbook, key, rowOf, colOf, DEF_W, DEF_H } from './model.js';
 import {
   MAX_ROWS, MAX_COLS, colName, addr, parseAddr, parseInput, formatValue, FErr, shiftFormula,
@@ -62,7 +64,8 @@ export async function mountSheet(root, data, app) {
   let scrollX = 0, scrollY = 0;
   let extentR = 200, extentC = 40;
   let dpr = canvasDpr();
-  let width = 0, height = 0;
+  let width = 0, height = 0; // mantıksal (yakınlaştırma öncesi) boyut
+  let zoom = 1; // görünüm yakınlaştırması; ızgara mantıksal piksellerle çizilir, ekranda zoom ile ölçeklenir
 
   // ---- DOM ------------------------------------------------------------------------------
   const toolbar = h('div', { class: 'toolbar', role: 'toolbar', 'aria-label': 'Tablo araçları' });
@@ -139,19 +142,20 @@ export async function mountSheet(root, data, app) {
     extentC = Math.min(MAX_COLS, Math.max(40, b.maxC + 20, visC, sel.c2 + 10));
     const totalW = HDR_W + colX(extentC);
     const totalH = HDR_H + rowY(extentR);
-    spacer.style.width = Math.min(totalW, 30000000) + 'px';
-    spacer.style.height = Math.min(totalH, 30000000) + 'px';
+    spacer.style.width = Math.min(totalW * zoom, 30000000) + 'px';
+    spacer.style.height = Math.min(totalH * zoom, 30000000) + 'px';
   }
 
   function resize() {
     const r = gridWrap.getBoundingClientRect();
-    width = Math.max(1, Math.floor(r.width));
-    height = Math.max(1, Math.floor(r.height));
+    const cw = Math.max(1, Math.floor(r.width)), ch = Math.max(1, Math.floor(r.height));
+    width = cw / zoom;
+    height = ch / zoom;
     dpr = canvasDpr();
-    canvas.width = Math.floor(width * dpr);
-    canvas.height = Math.floor(height * dpr);
-    canvas.style.width = width + 'px';
-    canvas.style.height = height + 'px';
+    canvas.width = Math.floor(cw * dpr);
+    canvas.height = Math.floor(ch * dpr);
+    canvas.style.width = cw + 'px';
+    canvas.style.height = ch + 'px';
     updateExtent();
     draw();
   }
@@ -172,7 +176,7 @@ export async function mountSheet(root, data, app) {
 
   function paint() {
     const theme = gridTheme();
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(dpr * zoom, 0, 0, dpr * zoom, 0, 0);
     ctx.fillStyle = theme.bg;
     ctx.fillRect(0, 0, width, height);
     const sh = sheet();
@@ -277,6 +281,7 @@ export async function mountSheet(root, data, app) {
       if (text === '') continue;
       const s = t.cell.s || {};
       ctx.font = fontOf(s);
+      ensureCanvasFont(ctx.font, draw);
       ctx.fillStyle = v instanceof FErr ? ERR_COLOR : s.fc || theme.text;
       let align = s.ha || (typeof v === 'number' ? 'right' : typeof v === 'boolean' || v instanceof FErr ? 'center' : 'left');
       const pad = 4;
@@ -525,16 +530,16 @@ export async function mountSheet(root, data, app) {
     if (c >= f.c) {
       const x = colX(c), w = colW(c);
       const viewW = width - HDR_W - fw;
-      if (x - scrollX < fw) scroller.scrollLeft = Math.max(0, x - fw);
-      else if (x + w - scrollX > fw + viewW) scroller.scrollLeft = x + w - viewW - fw + 2;
+      if (x - scrollX < fw) scroller.scrollLeft = Math.max(0, x - fw) * zoom;
+      else if (x + w - scrollX > fw + viewW) scroller.scrollLeft = (x + w - viewW - fw + 2) * zoom;
     }
     if (r >= f.r) {
       const y = rowY(r), hh = rowH(r);
       const viewH = height - HDR_H - fh;
-      if (y - scrollY < fh) scroller.scrollTop = Math.max(0, y - fh);
-      else if (y + hh - scrollY > fh + viewH) scroller.scrollTop = y + hh - viewH - fh + 2;
+      if (y - scrollY < fh) scroller.scrollTop = Math.max(0, y - fh) * zoom;
+      else if (y + hh - scrollY > fh + viewH) scroller.scrollTop = (y + hh - viewH - fh + 2) * zoom;
     }
-    scrollX = scroller.scrollLeft; scrollY = scroller.scrollTop;
+    scrollX = scroller.scrollLeft / zoom; scrollY = scroller.scrollTop / zoom;
   }
 
   function syncBar() {
@@ -579,6 +584,7 @@ export async function mountSheet(root, data, app) {
     cellEditor.value = text;
     barInput.value = text;
     Object.assign(cellEditor.style, {
+      zoom: String(zoom),
       left: Math.max(HDR_W, R.x) + 'px', top: Math.max(HDR_H, R.y) + 'px',
       minWidth: Math.max(40, R.w) + 'px', minHeight: Math.max(20, R.h) + 'px',
       font: fontOf(s), color: s.fc || '#000', background: s.bg || '#fff',
@@ -1180,14 +1186,14 @@ export async function mountSheet(root, data, app) {
 
   function localXY(e) {
     const rect = gridWrap.getBoundingClientRect();
-    return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    return { x: (e.clientX - rect.left) / zoom, y: (e.clientY - rect.top) / zoom };
   }
 
   scroller.addEventListener('pointerdown', (e) => {
     if (e.button === 2) return;
     // Kaydırma çubuğuna tıklanınca hücre seçme
     const { x, y } = localXY(e);
-    if (x > scroller.clientWidth || y > scroller.clientHeight) return;
+    if (x * zoom > scroller.clientWidth || y * zoom > scroller.clientHeight) return;
     const hit = hitTest(x, y);
     const touch = e.pointerType === 'touch';
     if (touch) {
@@ -1342,8 +1348,8 @@ export async function mountSheet(root, data, app) {
   });
 
   scroller.addEventListener('scroll', () => {
-    scrollX = scroller.scrollLeft;
-    scrollY = scroller.scrollTop;
+    scrollX = scroller.scrollLeft / zoom;
+    scrollY = scroller.scrollTop / zoom;
     const nearR = rowAtY(height) > extentR - 30, nearC = colAtX(width) > extentC - 5;
     if (nearR || nearC) updateExtent();
     if (editing && !editing.fromBar) positionEditor();
@@ -1356,7 +1362,7 @@ export async function mountSheet(root, data, app) {
     const R = rangeRect(sel.r1, sel.c1, sel.r2, sel.c2);
     const x = R.x + R.w, y = R.y + R.h;
     touchHandle.hidden = editing != null || x < HDR_W || y < HDR_H || x > width || y > height;
-    touchHandle.style.transform = `translate(${x - 11}px, ${y - 11}px)`;
+    touchHandle.style.transform = `translate(${x * zoom - 11}px, ${y * zoom - 11}px)`;
   }
   const isTouchUI = () => window.matchMedia('(pointer: coarse)').matches;
   touchHandle.addEventListener('pointerdown', (e) => {
@@ -1839,7 +1845,8 @@ export async function mountSheet(root, data, app) {
   fxBtn.addEventListener('click', () => functionMenu(fxBtn));
 
   // ---- Araç çubuğu ------------------------------------------------------------------------------
-  const fontSel = tselect(FONTS, (v) => { applyStyle({ ff: v === 'Calibri' ? null : v }); focusGrid(); }, { title: 'Yazı tipi', width: '120px', value: 'Calibri' });
+  const fontSel = tselect(usableFonts(FONTS), (v) => { applyStyle({ ff: v === 'Calibri' ? null : v }); focusGrid(); }, { title: 'Yazı tipi', width: '120px', value: 'Calibri' });
+  previewFontOptions(fontSel);
   const sizeSel = tselect(SIZES.map(String), (v) => { applyStyle({ fs: +v === 11 ? null : +v }); focusGrid(); }, { title: 'Yazı boyutu', width: '58px', value: '11' });
   const fmtSel = tselect(NUM_FORMATS, (v) => { applyStyle({ z: v === 'General' ? null : v }); focusGrid(); }, { title: 'Sayı biçimi', width: '130px', value: 'General' });
   const btn = {};
@@ -1982,7 +1989,9 @@ export async function mountSheet(root, data, app) {
     btn.vm.classList.toggle('on', s.va === 'middle');
     btn.vb.classList.toggle('on', !s.va);
     btn.merge.classList.toggle('on', !!wb.mergeAt(si, sel.r, sel.c));
-    fontSel.value = s.ff && FONTS.includes(s.ff) ? s.ff : 'Calibri';
+    const ff = s.ff || 'Calibri';
+    if (![...fontSel.options].some((o) => o.value === ff)) fontSel.append(h('option', { value: ff }, ff));
+    fontSel.value = ff;
     sizeSel.value = String(s.fs || 11);
     fmtSel.value = NUM_FORMATS.some((f) => f.value === (s.z || 'General')) ? (s.z || 'General') : 'General';
     btn.undo.disabled = !wb.canUndo();
@@ -2017,6 +2026,30 @@ export async function mountSheet(root, data, app) {
     }
     return null;
   }
+
+  // ---- Yakınlaştırma (iki parmak / Ctrl + tekerlek / alt çubuktaki yüzde) -------------------
+  const zoomBtn = h('button', { class: 'sheet-zoom', type: 'button', title: 'Yakınlaştırma (dokunarak %100)' }, '100%');
+  zoomBtn.addEventListener('click', () => setZoom(1, 0, 0));
+  bottom.append(zoomBtn);
+  function setZoom(z, fx, fy) {
+    z = Math.max(0.5, Math.min(3, Math.round(z * 100) / 100));
+    if (z === zoom) return;
+    // Parmakların altındaki mantıksal nokta yerinde kalsın
+    const lx = scrollX + fx / zoom, ly = scrollY + fy / zoom;
+    zoom = z;
+    zoomBtn.textContent = Math.round(z * 100) + '%';
+    resize();
+    scroller.scrollLeft = Math.max(0, lx * z - fx);
+    scroller.scrollTop = Math.max(0, ly * z - fy);
+    scrollX = scroller.scrollLeft / z; scrollY = scroller.scrollTop / z;
+    if (editing && !editing.fromBar) { cellEditor.style.zoom = String(z); positionEditor(); autoSizeEditor(); }
+    positionHandle();
+    draw();
+  }
+  pinchZoom(scroller, {
+    content: () => canvas, getZoom: () => zoom, setZoom, min: 0.5, max: 3, anchor: false,
+    onStart: () => { clearTimeout(longPress); drag = null; pointerSelecting = false; clearInterval(autoScrollTimer); },
+  });
 
   // ---- Başlangıç ----------------------------------------------------------------------------
   const ro = new ResizeObserver(() => resize());

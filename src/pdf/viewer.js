@@ -8,6 +8,7 @@ import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { h, tbtn, tsep, tselect, toast, clear, modal, popupMenu } from '../core/ui.js';
 import { saveBlob, printElement, canPrint, isSafeUrl, openExternal } from '../core/platform.js';
 import { LITE, canvasDpr } from '../core/perf.js';
+import { pinchZoom } from '../core/pinch.js';
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -406,6 +407,9 @@ export async function mountPdf(root, data, app) {
     e.preventDefault();
     zoomStep(e.deltaY < 0 ? 1 : -1);
   }, { passive: false });
+
+  // İki parmakla yakınlaştırma (telefon / dokunmatik ekran)
+  pinchZoom(scroller, { content: () => pagesEl, getZoom: () => scale, setZoom: (z) => setZoom(Math.round(z * 100) / 100), min: 0.25, max: 4, wheel: false });
 
   scroller.addEventListener('contextmenu', (e) => {
     const s = document.getSelection();

@@ -3,6 +3,8 @@ import { h, tbtn, tsep, tselect, popupMenu, colorPicker, askText, formDialog, to
 import { sanitizeHtml, sanitizeToFragment } from '../core/sanitize.js';
 import { pickFile, normalizeImage } from '../core/files.js';
 import { saveBlob, printElement, canPrint, openExternal, isSafeUrl } from '../core/platform.js';
+import { usableFonts, previewFontOptions } from '../core/fonts.js';
+import { pinchZoom } from '../core/pinch.js';
 
 const FONTS = ['Calibri', 'Arial', 'Times New Roman', 'Georgia', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Segoe UI', 'Courier New', 'Garamond'];
 const SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
@@ -306,7 +308,8 @@ export async function mountWord(root, data, app) {
 
   // ---- Araç çubuğu ---------------------------------------------------------------
   const blockSel = tselect(BLOCKS, (v) => exec('formatBlock', `<${v}>`), { title: 'Paragraf stili', width: '110px' });
-  const fontSel = tselect(FONTS.map((f) => ({ value: f, label: f })), (v) => exec('fontName', v), { title: 'Yazı tipi', width: '130px' });
+  const fontSel = tselect(usableFonts(FONTS).map((f) => ({ value: f, label: f })), (v) => exec('fontName', v), { title: 'Yazı tipi', width: '130px' });
+  previewFontOptions(fontSel);
   const sizeSel = tselect(SIZES.map((s) => ({ value: String(s), label: String(s) })), (v) => setFontSize(+v), { title: 'Yazı boyutu', width: '64px', value: '11' });
   const btn = (key, ic, title, fn, opts) => { const b = tbtn(ic, title, fn, opts); state[key] = b; return b; };
 
@@ -399,6 +402,8 @@ export async function mountWord(root, data, app) {
   };
   status.append(statText, h('span', { class: 'spacer' }),
     tbtn('zoomOut', 'Uzaklaştır', () => setZoom(zoom - 0.1)), zoomLabel, tbtn('zoomIn', 'Yakınlaştır', () => setZoom(zoom + 0.1)));
+  // İki parmakla (telefon) veya Ctrl + tekerlekle yakınlaştırma
+  pinchZoom(scroller, { content: () => scroller.firstElementChild, getZoom: () => zoom, setZoom: (z) => setZoom(z), min: 0.5, max: 2.5 });
   const updateStats = debounce(() => {
     const text = page.innerText || '';
     const words = (text.match(/\S+/g) || []).length;

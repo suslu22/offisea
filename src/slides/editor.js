@@ -5,6 +5,8 @@ import { h, tbtn, tsep, tselect, popupMenu, colorPicker, formDialog, toast, clea
 import { sanitizeSlideHtml } from '../core/sanitize.js';
 import { pickFile, normalizeImage } from '../core/files.js';
 import { saveBlob, printElement, canPrint, isSafeUrl, openExternal } from '../core/platform.js';
+import { usableFonts, previewFontOptions } from '../core/fonts.js';
+import { pinchZoom } from '../core/pinch.js';
 import { DEF_W, DEF_H, uid, LAYOUTS, SHAPES, newSlide, newDeck, normalizeDeck, renderSlide, renderItem, scaledSlide, htmlToText } from './model.js';
 
 const FONTS = ['Calibri', 'Calibri Light', 'Arial', 'Segoe UI', 'Times New Roman', 'Georgia', 'Verdana', 'Tahoma', 'Trebuchet MS', 'Courier New', 'Garamond', 'Century Gothic'];
@@ -828,9 +830,19 @@ export async function mountSlides(root, data, app) {
   }
 
   let longPress = 0;
+  let cancelTrack = null; // süren sürükleme (taşıma, boyutlandırma, seçim kutusu) varsa iptal eder
+  const touches = new Set();
+  const dropTouch = (e) => touches.delete(e.pointerId);
+  stageWrap.addEventListener('pointerup', dropTouch, true);
+  stageWrap.addEventListener('pointercancel', dropTouch, true);
   stageWrap.addEventListener('pointerdown', (e) => {
     if (show || !slideEl) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.pointerType === 'touch') {
+      touches.add(e.pointerId);
+      // İkinci parmak: iki parmakla yakınlaştırma başlıyor; tek parmakla başlayan işi bırak.
+      if (touches.size > 1) { clearTimeout(longPress); longPress = 0; if (cancelTrack) cancelTrack(); return; }
+    }
     const t = e.target;
     if (editing) {
       if (editing.el.contains(t)) return; // metin içinde imleç ve seçim serbest
@@ -863,8 +875,19 @@ export async function mountSlides(root, data, app) {
       return;
     }
     if (!e.shiftKey) { sel = new Set(); renderSel(); updateToolbar(); }
+    if (e.pointerType === 'touch' && zoomMode !== 'fit') { startPan(e); return; }
     startMarquee(e);
   });
+
+  // Yakınlaştırılmışken boş alanda tek parmakla kaydırma
+  function startPan(e) {
+    const sx = e.clientX, sy = e.clientY, l0 = stageWrap.scrollLeft, t0 = stageWrap.scrollTop;
+    trackPointer(e, (ev) => {
+      if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) > 6) clearTimeout(longPress);
+      stageWrap.scrollLeft = l0 - (ev.clientX - sx);
+      stageWrap.scrollTop = t0 - (ev.clientY - sy);
+    }, () => {});
+  }
 
   stageWrap.addEventListener('contextmenu', (e) => {
     if (editing && editing.el.contains(e.target)) return; // metin içinde tarayıcı menüsü (yazım denetimi)
@@ -881,6 +904,7 @@ export async function mountSlides(root, data, app) {
     const mv = (ev) => { if (ev.pointerId === pid) onMove(ev); };
     const up = (ev) => {
       if (ev.pointerId !== pid) return;
+      cancelTrack = null;
       stageWrap.removeEventListener('pointermove', mv);
       stageWrap.removeEventListener('pointerup', up);
       stageWrap.removeEventListener('pointercancel', up);
@@ -891,6 +915,7 @@ export async function mountSlides(root, data, app) {
     stageWrap.addEventListener('pointermove', mv);
     stageWrap.addEventListener('pointerup', up);
     stageWrap.addEventListener('pointercancel', up);
+    cancelTrack = () => up({ pointerId: pid, type: 'pointercancel', clientX: e.clientX, clientY: e.clientY });
   }
 
   function snapTargets() {
@@ -1260,12 +1285,42 @@ export async function mountSlides(root, data, app) {
   }
 
   // ---- Araç çubuğu ---------------------------------------------------------------------------
-  const fontSel = tselect(FONTS.map((f) => ({ value: f, label: f })), (v) => setFont(v), { title: 'Yazı tipi', width: '132px' });
+  const fontSel = tselect(usableFonts(FONTS).map((f) => ({ value: f, label: f })), (v) => setFont(v), { title: 'Yazı tipi', width: '132px' });
+  previewFontOptions(fontSel);
   const sizeSel = tselect(PT_SIZES.map((s) => ({ value: String(s), label: String(s) })), (v) => setSizePt(+v), { title: 'Yazı boyutu (punto)', width: '64px' });
   const zoomSel = tselect([
     { value: 'fit', label: 'Sığdır' }, { value: '0.5', label: '%50' }, { value: '0.75', label: '%75' },
     { value: '1', label: '%100' }, { value: '1.5', label: '%150' }, { value: '2', label: '%200' },
-  ], (v) => { zoomMode = v === 'fit' ? 'fit' : +v; stageWrap.classList.toggle('zoomed', zoomMode !== 'fit'); applyScale(); renderSel(); updateStatus(); }, { title: 'Yakınlaştırma', width: '84px', value: 'fit' });
+  ], (v) => { if (v !== 'custom') setZoomMode(v === 'fit' ? 'fit' : +v); }, { title: 'Yakınlaştırma', width: '84px', value: 'fit' });
+  function setZoomMode(z) {
+    zoomMode = z;
+    stageWrap.classList.toggle('zoomed', zoomMode !== 'fit');
+    applyScale();
+    renderSel();
+    updateStatus();
+    const v = String(z);
+    if ([...zoomSel.options].some((o) => o.value === v && v !== 'custom')) zoomSel.value = v;
+    else {
+      let opt = zoomSel.querySelector('option[value="custom"]');
+      if (!opt) { opt = h('option', { value: 'custom' }); zoomSel.append(opt); }
+      opt.textContent = `%${Math.round(scale * 100)}`;
+      zoomSel.value = 'custom';
+    }
+  }
+  // İki parmakla (telefon) veya Ctrl + tekerlekle yakınlaştırma. Sığdır ölçeğinin altına inince "Sığdır"a döner.
+  pinchZoom(stageWrap, {
+    content: () => stageHost,
+    getZoom: () => scale,
+    setZoom: (z) => {
+      const keep = zoomMode;
+      zoomMode = 'fit'; applyScale();
+      const fit = scale;
+      zoomMode = keep;
+      setZoomMode(z <= fit * 1.03 ? 'fit' : Math.round(z * 100) / 100);
+    },
+    min: 0.1, max: 4,
+    onStart: () => { clearTimeout(longPress); longPress = 0; if (cancelTrack) cancelTrack(); },
+  });
 
   const btn = {};
   const undoBtn = tbtn('undo', 'Geri al (Ctrl+Z)', () => undo());
