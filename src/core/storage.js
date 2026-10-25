@@ -1,7 +1,10 @@
 // Belgeler yalnızca bu cihazda (IndexedDB) saklanır; hiçbir sunucuya gönderilmez.
 const DB_NAME = 'offisea';
-const DB_VERSION = 1;
+const DB_VERSION = 2; // 2: klasörler
 let dbPromise = null;
+
+/** Çöp kutusundaki belgeler bu kadar gün sonra kendiliğinden kalıcı olarak silinir. */
+export const TRASH_DAYS = 30;
 
 function openDb() {
   if (dbPromise) return dbPromise;
@@ -11,6 +14,7 @@ function openDb() {
       const db = req.result;
       if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('data')) db.createObjectStore('data', { keyPath: 'id' });
+      if (!db.objectStoreNames.contains('folders')) db.createObjectStore('folders', { keyPath: 'id' });
     };
     req.onsuccess = () => resolve(req.result);
     req.onerror = () => reject(req.error);
@@ -35,15 +39,42 @@ export function newId() {
   return Array.from(a, (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-export async function saveDoc({ id, kind, title, data, size = 0 }) {
+/**
+ * Belgeyi kaydeder. Klasör ve çöp kutusu bilgisi (folder, trashed) korunur; yeni belge için
+ * `folder` verilebilir.
+ */
+export async function saveDoc({ id, kind, title, data, size = 0, folder }) {
   const db = await openDb();
   const updated = Date.now();
   await tx(db, ['meta', 'data'], 'readwrite', (t) => {
-    t.objectStore('meta').put({ id, kind, title, updated, size });
+    const metas = t.objectStore('meta');
+    metas.get(id).onsuccess = (e) => {
+      const old = e.target.result || {};
+      const m = { id, kind, title, updated, size };
+      const f = folder !== undefined ? folder : old.folder;
+      if (f) m.folder = f;
+      if (old.trashed) m.trashed = old.trashed;
+      metas.put(m);
+    };
     t.objectStore('data').put({ id, data });
   });
   requestPersistence();
   return updated;
+}
+
+/** Yalnızca belge bilgilerini değiştirir (ad, klasör, çöp kutusu); içerik ve tarih aynı kalır. */
+export async function updateMeta(id, patch) {
+  const db = await openDb();
+  await tx(db, ['meta'], 'readwrite', (t) => {
+    const metas = t.objectStore('meta');
+    metas.get(id).onsuccess = (e) => {
+      const m = e.target.result;
+      if (!m) return;
+      const n = { ...m, ...patch };
+      for (const k of Object.keys(n)) if (n[k] === undefined || n[k] === null) delete n[k];
+      metas.put(n);
+    };
+  });
 }
 
 export async function loadDoc(id) {
@@ -57,6 +88,7 @@ export async function loadDoc(id) {
   return { ...meta, data: data.data };
 }
 
+/** Tüm belgeler (çöp kutusundakiler dahil; `trashed` alanıyla ayırt edilir), en yeni önce. */
 export async function listDocs() {
   const db = await openDb();
   let all = [];
@@ -66,11 +98,55 @@ export async function listDocs() {
   return all.sort((a, b) => b.updated - a.updated);
 }
 
+/** Kalıcı olarak siler. */
 export async function deleteDoc(id) {
   const db = await openDb();
   await tx(db, ['meta', 'data'], 'readwrite', (t) => {
     t.objectStore('meta').delete(id);
     t.objectStore('data').delete(id);
+  });
+}
+
+export const trashDoc = (id) => updateMeta(id, { trashed: Date.now() });
+export const restoreDoc = (id) => updateMeta(id, { trashed: null });
+
+/** Süresi dolan çöp kutusu belgelerini kalıcı olarak siler; silinen sayısını döndürür. */
+export async function purgeTrash(days = TRASH_DAYS) {
+  const limit = Date.now() - days * 86400000;
+  const old = (await listDocs()).filter((d) => d.trashed && d.trashed < limit);
+  for (const d of old) await deleteDoc(d.id);
+  return old.length;
+}
+
+// ---- Klasörler ----------------------------------------------------------------------------------
+export async function listFolders() {
+  const db = await openDb();
+  let all = [];
+  await tx(db, ['folders'], 'readonly', (t) => {
+    t.objectStore('folders').getAll().onsuccess = (e) => { all = e.target.result || []; };
+  });
+  return all.sort((a, b) => a.name.localeCompare(b.name, 'tr'));
+}
+
+export async function saveFolder({ id = newId(), name }) {
+  const db = await openDb();
+  const f = { id, name: String(name).slice(0, 80) };
+  await tx(db, ['folders'], 'readwrite', (t) => { t.objectStore('folders').put(f); });
+  return f;
+}
+
+/** Klasörü siler; içindeki belgeler silinmez, klasörsüz kalır. */
+export async function deleteFolder(id) {
+  const db = await openDb();
+  await tx(db, ['folders', 'meta'], 'readwrite', (t) => {
+    t.objectStore('folders').delete(id);
+    const metas = t.objectStore('meta');
+    metas.openCursor().onsuccess = (e) => {
+      const cur = e.target.result;
+      if (!cur) return;
+      if (cur.value.folder === id) { const m = { ...cur.value }; delete m.folder; cur.update(m); }
+      cur.continue();
+    };
   });
 }
 

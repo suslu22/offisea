@@ -72,4 +72,10 @@
     <!-- Yalnızca Android 10 ve öncesinde Belgeler/Offisea klasörüne kaydetmek için; yeni sürümlerde izin istenmez. -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <!-- Belge tarama: telefonun kamera uygulamasını açabilmek için (Android 11+). Kamera izni istenmez. -->
+    <queries>
+        <intent>
+            <action android:name="android.media.action.IMAGE_CAPTURE" />
+        </intent>
+    </queries>
 </manifest>

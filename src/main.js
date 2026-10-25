@@ -3,11 +3,11 @@ import './fonts.css';
 import './styles.css';
 import { h, icon, clear, debounce, toast, popupMenu, closeMenus, closeTopModal, tbtn } from './core/ui.js';
 import { saveDoc, loadDoc, newId, getPref, setPref } from './core/storage.js';
-import { pickFile, kindOf, legacyMessage, baseName, readArrayBuffer, MAX_FILE_BYTES, ACCEPT_ALL } from './core/files.js';
+import { pickFile, pickFiles, kindOf, legacyMessage, baseName, readArrayBuffer, MAX_FILE_BYTES, ACCEPT_ALL } from './core/files.js';
 import { isNative, isElectron, openExternal } from './core/platform.js';
 import { initUpdates } from './core/updater.js';
 import { LITE, whenIdle, applyPerfClass, applyGlass, probeGlassLater } from './core/perf.js';
-import { renderHome, KINDS, showAbout } from './home.js';
+import { renderHome, KINDS, showAbout, homeBack, currentFolder } from './home.js';
 import { applyTheme, toggleTheme, onThemeChange } from './core/theme.js';
 
 const topbar = document.getElementById('topbar');
@@ -177,7 +177,7 @@ async function route() {
   if (seq !== routeSeq) return;
   if (!m) {
     renderHomeBar();
-    await renderHome(view, { openFile, createNew, openDoc: go, installPrompt });
+    await renderHome(view, { openFile, createNew, openDoc: go, installPrompt, scanDoc, mergePdfs: mergePdfFiles });
     return;
   }
   const done = busy('Açılıyor…');
@@ -199,7 +199,7 @@ async function mountEditor(doc, seq) {
   view.className = 'view view-editor';
   const host = h('div', { class: 'editor-host' });
   view.append(host);
-  const app = { markDirty };
+  const app = { markDirty, createDoc, replaceData, pickFiles, busy, title: () => (cur ? cur.title : doc.title || '') };
   let editor;
   if (doc.kind === 'word') editor = await (await import('./word/editor.js')).mountWord(host, doc.data, app);
   else if (doc.kind === 'sheet') editor = await (await import('./sheet/grid.js')).mountSheet(host, doc.data, app);
@@ -218,14 +218,80 @@ window.addEventListener('popstate', () => {
 window.addEventListener('hashchange', () => route());
 
 // ---- Belge oluşturma ve dosya açma --------------------------------------------------------------
-async function createNew(kind) {
-  let data;
-  if (kind === 'word') data = { html: '<p><br></p>' };
-  else if (kind === 'sheet') data = (await import('./sheet/grid.js')).newSheetData();
-  else data = (await import('./slides/editor.js')).newSlidesData();
+async function createNew(kind, { template } = {}) {
+  let data, title = KINDS[kind].newTitle;
+  if (template) {
+    const t = (await import('./templates.js')).templateById(template);
+    if (t) { data = t.data(); title = t.title; kind = t.kind; }
+  }
+  if (!data) {
+    if (kind === 'word') data = { html: '<p><br></p>' };
+    else if (kind === 'sheet') data = (await import('./sheet/grid.js')).newSheetData();
+    else data = (await import('./slides/editor.js')).newSlidesData();
+  }
+  await createDoc({ kind, title, data, size: 0 });
+}
+
+/** Yeni belgeyi kaydedip açar (ana ekranda seçili klasöre konur). */
+async function createDoc({ kind, title, data, size = 0 }) {
   const id = newId();
-  await saveDoc({ id, kind, title: KINDS[kind].newTitle, data, size: 0 });
+  await saveDoc({ id, kind, title: String(title || KINDS[kind].newTitle).slice(0, 200), data, size, folder: currentFolder() });
+  if (cur) await closeEditor();
   go(id);
+  return id;
+}
+
+/** Açık belgenin içeriğini değiştirip düzenleyiciyi yeniden yükler (ör. PDF sayfa işlemleri). */
+async function replaceData(data, { size } = {}) {
+  if (!cur) return;
+  const c = cur;
+  await saveNow();
+  await saveDoc({ id: c.id, kind: c.kind, title: c.title, data, size: size != null ? size : c.size || 0 });
+  if (c !== cur) return;
+  const seq = ++routeSeq;
+  cur = null;
+  statusEl = null;
+  try { c.editor.destroy(); } catch (e) { console.warn(e); }
+  const doc = await loadDoc(c.id);
+  if (doc) await mountEditor(doc, seq);
+}
+
+async function scanDoc() {
+  try {
+    const r = await (await import('./pdf/scan.js')).scanDocument();
+    if (!r) return;
+    const date = new Date().toLocaleDateString('tr-TR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    await createDoc({ kind: 'pdf', title: `Taranmış belge ${date}`, data: { bytes: r.bytes }, size: r.bytes.byteLength });
+  } catch (err) {
+    console.error(err);
+    toast(err.message || 'Tarama başarısız.', { type: 'error', timeout: 7000 });
+  }
+}
+
+async function mergePdfFiles() {
+  const files = (await pickFiles('.pdf,application/pdf')).filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+  if (!files.length) return;
+  if (files.length === 1) { openFileObj(files[0]); return; }
+  if (files.some((f) => f.size > MAX_FILE_BYTES)) { toast('Dosyalardan biri çok büyük (en fazla 150 MB).', { type: 'error' }); return; }
+  try {
+    const ui = await import('./pdf/tools-ui.js');
+    const ordered = await ui.orderFilesDialog(files);
+    if (!ordered) return;
+    const done = busy('PDF dosyaları birleştiriliyor…');
+    try {
+      const tools = await import('./pdf/tools.js');
+      const bufs = [];
+      for (const f of ordered) bufs.push(await readArrayBuffer(f));
+      const { bytes, rasterized } = await tools.mergePdfs(bufs);
+      const buf = tools.toBuffer(bytes);
+      done();
+      if (rasterized) toast('Şifreli dosyalardaki sayfalar resim olarak eklendi.', { timeout: 6000 });
+      await createDoc({ kind: 'pdf', title: baseName(ordered[0].name) + ' (birleştirilmiş)', data: { bytes: buf }, size: buf.byteLength });
+    } finally { done(); }
+  } catch (err) {
+    console.error(err);
+    toast('PDF dosyaları birleştirilemedi: ' + (err.message || err), { type: 'error', timeout: 8000 });
+  }
 }
 
 async function openFile() {
@@ -255,7 +321,7 @@ async function openFileObj(file) {
       data = { bytes };
     }
     const id = newId();
-    await saveDoc({ id, kind, title: baseName(file.name).slice(0, 200), data, size: file.size });
+    await saveDoc({ id, kind, title: baseName(file.name).slice(0, 200), data, size: file.size, folder: currentFolder() });
     done();
     if (cur) await closeEditor();
     go(id);
@@ -316,6 +382,7 @@ function handleBackButton(exitApp) {
     return;
   }
   if (DOC_RE.test(location.hash)) { goHome(); return; } // belge henüz açılıyor
+  if (homeBack()) return; // klasör / çöp kutusu açıksa önce "Tümü"ne dön
   const now = Date.now();
   if (now - lastBackAtHome < 2000) { exitApp(); return; }
   lastBackAtHome = now;

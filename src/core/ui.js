@@ -215,7 +215,7 @@ export function closeTopModal() {
   return true;
 }
 
-export function modal({ title, body, actions = [{ label: 'Tamam', value: true, primary: true }], onOpen }) {
+export function modal({ title, body, actions = [{ label: 'Tamam', value: true, primary: true }], onOpen, onClose, persistent = false }) {
   return new Promise((resolve) => {
     const prevFocus = document.activeElement;
     const overlay = h('div', { class: 'modal-overlay' });
@@ -237,7 +237,8 @@ export function modal({ title, body, actions = [{ label: 'Tamam', value: true, p
     }
     dlg.append(foot);
     overlay.append(dlg);
-    overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay) done(null); });
+    overlay.addEventListener('pointerdown', (e) => { if (e.target === overlay && !persistent) done(null); });
+    if (onClose) onClose(done); // çağırana kapatma işlevini verir
     const onKey = (e) => {
       if (modalStack[modalStack.length - 1] !== done) return; // yalnızca en üstteki diyalog tuşları işler
       if (e.key === 'Escape') { e.stopPropagation(); done(null); }

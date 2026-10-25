@@ -3,16 +3,14 @@
 // - PDF içi JavaScript (scripting) hiç yüklenmez, XFA formları kapalı, WebAssembly kapalı
 //   (CSP'de 'wasm-unsafe-eval' gerekmez; saf JS yedekleri kullanılır).
 // - Bağlantılar yalnızca http/https/mailto ise ve kullanıcı tıklarsa sistem tarayıcısında açılır.
-import * as pdfjs from 'pdfjs-dist';
-import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { h, tbtn, tsep, tselect, toast, clear, modal, popupMenu } from '../core/ui.js';
+import { pdfjs, loadPdfJs } from './pdfjs.js';
+import { h, tbtn, tsep, tselect, toast, clear, modal, popupMenu, askText, confirmBox } from '../core/ui.js';
 import { saveBlob, printElement, canPrint, isSafeUrl, openExternal } from '../core/platform.js';
 import { LITE, canvasDpr } from '../core/perf.js';
 import { pinchZoom } from '../core/pinch.js';
+import { createAnnotator, cleanAnnots, renderLayerPng, drawItems } from './annotate.js';
 
-pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
-
-const assetUrl = (p) => new URL(p, document.baseURI).href;
+const loadTools = () => import('./tools.js');
 // Telefonlarda sayfa başına tuval belleği sınırlı tutulur; bellekte daha az sayfa kalır.
 const MAX_CANVAS_PIXELS = (LITE ? 6 : 16) * 1024 * 1024;
 const KEEP_PAGES = LITE ? 3 : 6;
@@ -41,24 +39,14 @@ export async function mountPdf(root, data, app) {
   status.textContent = 'PDF açılıyor…';
 
   // pdf.js veriyi işçiye aktarır (transfer); kayıtlı kopyayı korumak için kopyasını veriyoruz.
-  const task = pdfjs.getDocument({
-    data: new Uint8Array(bytes.slice(0)),
-    enableXfa: false,
-    useWasm: false,
-    isEvalSupported: false, // eski sürümlerle uyumluluk için; 6.x zaten eval kullanmaz
-    disableAutoFetch: true,
-    stopAtErrors: false,
-    cMapUrl: assetUrl('pdfjs/cmaps/'),
-    cMapPacked: true,
-    standardFontDataUrl: assetUrl('pdfjs/standard_fonts/'),
-    wasmUrl: assetUrl('pdfjs/wasm/'),
-    iccUrl: assetUrl('pdfjs/iccs/'),
-  });
+  const task = loadPdfJs(bytes);
   let pwTries = 0;
+  let password; // yalnızca bellekte tutulur; sayfa işlemlerinde dosyayı çözmek için
   task.onPassword = async (update, reason) => {
     const pw = await askPassword(reason === pdfjs.PasswordResponses.INCORRECT_PASSWORD || pwTries > 0);
     pwTries++;
     if (pw == null) { task.destroy(); return; }
+    password = pw;
     update(pw);
   };
 
@@ -90,6 +78,17 @@ export async function mountPdf(root, data, app) {
     pagesEl.append(el);
     pages.push({ el, canvasBox, textBox, linkBox, num: i, vp1: i === 1 ? baseVp : null, page: i === 1 ? first : null, renderedScale: 0, task: null });
   }
+
+  // ---- Notlar (kalem, vurgulayıcı, metin, imza) --------------------------------------------------
+  const annot = createAnnotator({
+    pages, pagesEl,
+    getSize: (p) => p.vp1 || baseVp,
+    currentPage: () => currentPage(),
+    initial: cleanAnnots(data.annots, n),
+    onChange: (items) => { data.annots = items; app.markDirty(); },
+    readOnlyReason: () => null,
+  });
+  toolbar.after(annot.bar);
 
   function computeScale() {
     const avail = Math.max(100, scroller.clientWidth - 32);
@@ -147,6 +146,7 @@ export async function mountPdf(root, data, app) {
         await tl.render();
       } catch { /* metin katmanı isteğe bağlı */ }
       await renderLinks(p, vp);
+      annot.drawPage(p);
       if (target !== scale) { p.renderedScale = 0; renderPage(p); }
     } catch (err) {
       p.task = null;
@@ -333,6 +333,8 @@ export async function mountPdf(root, data, app) {
         const c = document.createElement('canvas');
         c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
         await pg.render({ canvas: c, viewport: vp, intent: 'print', annotationMode: pdfjs.AnnotationMode.ENABLE_STORAGE }).promise;
+        const its = annot.items().filter((x) => x.p === i - 1);
+        if (its.length) await drawItems(c.getContext('2d'), its, 150 / 72);
         const blob = await new Promise((res) => c.toBlob(res, 'image/jpeg', 0.92));
         imgs.push({ url: URL.createObjectURL(blob), w: pg.getViewport({ scale: 1 }).width, h: pg.getViewport({ scale: 1 }).height });
         c.width = c.height = 0;
@@ -362,6 +364,135 @@ export async function mountPdf(root, data, app) {
     modal({ title: 'Belge bilgileri', body: h('div', null, tbl, note) });
   }
 
+  // ---- Sayfa işlemleri ---------------------------------------------------------------------------
+  async function pageSize(idx) {
+    const p = pages[idx];
+    if (p.vp1) return p.vp1;
+    return (await pdf.getPage(idx + 1)).getViewport({ scale: 1 });
+  }
+  /** Notlar sayfalara işlenmiş PDF baytları (not yoksa dosyanın kendisi). */
+  async function outputBytes() {
+    const items = annot.items();
+    if (!items.length) return new Uint8Array(bytes);
+    const tools = await loadTools();
+    const layers = new Map();
+    for (const idx of [...new Set(items.map((i) => i.p))]) {
+      const vp = await pageSize(idx);
+      layers.set(idx, await renderLayerPng(items.filter((i) => i.p === idx), vp.width, vp.height));
+    }
+    return tools.flattenLayers(bytes, layers, { password });
+  }
+  async function work(text, fn) {
+    const done = app.busy ? app.busy(text) : () => {};
+    try { return await fn(await loadTools()); } catch (err) {
+      console.error(err);
+      toast((err && err.message) || 'İşlem başarısız.', { type: 'error', timeout: 7000 });
+      return null;
+    } finally { done(); }
+  }
+  async function confirmBake() {
+    if (!annot.items().length) return true;
+    return confirmBox('Notlar sayfaya işlenecek', 'Bu işlemden önce eklediğiniz notlar ve imzalar sayfalara kalıcı olarak işlenir (sonradan taşınamaz). Devam edilsin mi?', { okLabel: 'Devam et' });
+  }
+  async function replaceBytes(u8, msg, page) {
+    const tools = await loadTools();
+    const buf = tools.toBuffer(u8);
+    await app.replaceData({ bytes: buf, lastPage: page || currentPage() }, { size: buf.byteLength });
+    if (msg) toast(msg, { type: 'success' });
+  }
+  async function rotate(indices, delta) {
+    if (!(await confirmBake())) return;
+    const page = currentPage();
+    const out = await work('Sayfalar döndürülüyor…', async (t) => t.rotatePages(await outputBytes(), indices, delta, { password }));
+    if (out) await replaceBytes(out, null, page);
+  }
+  async function removePages(indices) {
+    if (indices.length >= n) { toast('Tüm sayfalar silinemez.', { type: 'error' }); return; }
+    const label = indices.length === 1 ? `${indices[0] + 1}. sayfa` : `${indices.length} sayfa`;
+    if (!(await confirmBox('Sayfaları sil', `${label} silinsin mi?`, { okLabel: 'Sil', danger: true }))) return;
+    if (!(await confirmBake())) return;
+    const page = Math.min(currentPage(), n - indices.length);
+    const out = await work('Sayfalar siliniyor…', async (t) => t.deletePages(await outputBytes(), indices, { password }));
+    if (out) await replaceBytes(out, `${label} silindi.`, page);
+  }
+  async function askRange(title, okHint) {
+    const t = await askText(title, { label: `Sayfa aralığı (1–${n}). ${okHint}`, placeholder: 'ör. 1-3, 5, 8-' });
+    if (t == null || !t.trim()) return null;
+    const { parseRange } = await loadTools();
+    const r = parseRange(t, n);
+    if (!r) { toast('Sayfa aralığı anlaşılamadı. Örnek: 1-3, 5', { type: 'error' }); return null; }
+    return { list: r, text: t.trim() };
+  }
+  async function extract() {
+    const r = await askRange('Sayfaları ayrı PDF olarak çıkar', 'Seçilen sayfalar yeni bir PDF olur.');
+    if (!r) return;
+    const out = await work('Sayfalar çıkarılıyor…', async (t) => t.extractPages(await outputBytes(), r.list, { password }));
+    if (!out) return;
+    const buf = (await loadTools()).toBuffer(out);
+    await app.createDoc({ kind: 'pdf', title: `${app.title ? app.title() : 'PDF'} (sayfa ${r.text})`, data: { bytes: buf }, size: buf.byteLength });
+  }
+  async function deleteRange() {
+    const r = await askRange('Sayfaları sil', 'Seçilen sayfalar silinir.');
+    if (r) removePages([...new Set(r.list)]);
+  }
+  async function appendFiles() {
+    const files = (await app.pickFiles('.pdf,application/pdf')).filter((f) => /\.pdf$/i.test(f.name) || f.type === 'application/pdf');
+    if (!files.length) return;
+    if (!(await confirmBake())) return;
+    const page = currentPage();
+    const out = await work('PDF ekleniyor…', async (t) => {
+      const others = [];
+      for (const f of files) others.push(await f.arrayBuffer());
+      return t.appendPdfs(await outputBytes(), others, { password });
+    });
+    if (out) await replaceBytes(out, `${files.length} dosya sona eklendi.`, page);
+  }
+  async function compress() {
+    const sel = h('select', { class: 'input', 'aria-label': 'Kalite' },
+      h('option', { value: '150|0.8' }, 'Yüksek kalite (az küçülür)'),
+      h('option', { value: '110|0.7' }, 'Dengeli (önerilen)'),
+      h('option', { value: '80|0.55' }, 'En küçük boyut'));
+    sel.value = '110|0.7';
+    const r = await modal({
+      title: 'PDF’i küçült',
+      body: h('div', null,
+        h('p', null, 'Sayfalar sıkıştırılmış resimlere dönüştürülerek dosya küçültülür. Küçültülmüş kopyada metin seçilemez ve aranamaz; asıl dosya değişmez.'),
+        h('label', { class: 'field-label' }, 'Kalite'), sel),
+      actions: [{ label: 'İptal', value: null }, { label: 'Küçült', primary: true, value: () => sel.value }],
+    });
+    if (!r) return;
+    const [dpi, q] = r.split('|').map(Number);
+    const before = bytes.byteLength;
+    const out = await work('PDF küçültülüyor…', async (t) => t.rasterize(await outputBytes(), { password, dpi, quality: q }));
+    if (!out) return;
+    if (out.byteLength >= before * 0.95) { toast('Bu dosya daha fazla küçültülemiyor.', { timeout: 5000 }); return; }
+    const fmt = (b) => (b / 1024 / 1024 >= 1 ? (b / 1024 / 1024).toFixed(1).replace('.', ',') + ' MB' : Math.round(b / 1024) + ' KB');
+    toast(`${fmt(before)} → ${fmt(out.byteLength)} (küçültülmüş kopya oluşturuldu)`, { type: 'success', timeout: 6000 });
+    const buf = (await loadTools()).toBuffer(out);
+    await app.createDoc({ kind: 'pdf', title: `${app.title ? app.title() : 'PDF'} (küçültülmüş)`, data: { bytes: buf }, size: buf.byteLength });
+  }
+  function pageMenu(anchor) {
+    const cp = currentPage();
+    popupMenu(anchor, [
+      { header: `Bu sayfa (${cp})` },
+      { label: 'Sağa döndür', icon: 'rotate', onClick: () => rotate([cp - 1], 90) },
+      { label: 'Sola döndür', icon: 'restore', onClick: () => rotate([cp - 1], -90) },
+      n > 1 ? { label: 'Bu sayfayı sil', icon: 'trash', onClick: () => removePages([cp - 1]) } : null,
+      { separator: true },
+      { header: 'Tüm belge' },
+      { label: 'Tüm sayfaları sağa döndür', icon: 'rotate', onClick: () => rotate(pages.map((p) => p.num - 1), 90) },
+      { label: 'Sayfaları ayrı PDF olarak çıkar…', icon: 'pages', onClick: extract },
+      n > 1 ? { label: 'Sayfaları sil…', icon: 'trash', onClick: deleteRange } : null,
+      { label: 'Sona başka PDF ekle…', icon: 'plus', onClick: appendFiles },
+      { label: 'PDF’i küçült…', icon: 'compress', onClick: compress },
+    ], { minWidth: 250 });
+  }
+  async function savePdf(title) {
+    if (!annot.items().length) { saveBlob(new Blob([bytes], { type: 'application/pdf' }), `${title}.pdf`); return; }
+    const out = await work('Notlar PDF’e işleniyor…', () => outputBytes());
+    if (out) saveBlob(new Blob([out], { type: 'application/pdf' }), `${title}.pdf`);
+  }
+
   // ---- Araç çubuğu ---------------------------------------------------------------------------
   const pageInput = h('input', { class: 'input page-input', type: 'number', min: '1', max: String(n), value: '1', 'aria-label': 'Sayfa numarası' });
   pageInput.addEventListener('change', () => gotoPage(+pageInput.value));
@@ -380,6 +511,9 @@ export async function mountPdf(root, data, app) {
     tbtn('zoomOut', 'Uzaklaştır', () => zoomStep(-1)),
     zoomSel,
     tbtn('zoomIn', 'Yakınlaştır', () => zoomStep(1)),
+    tsep(),
+    tbtn('pen', 'Not ekle ve imzala', () => annot.toggleBar(!annot.isOpen()), { text: 'Düzenle', cls: 'tb-wide' }),
+    tbtn('pages', 'Sayfa işlemleri', (e, b) => pageMenu(b), { text: 'Sayfalar', cls: 'tb-wide' }),
     tsep(),
     tbtn('search', 'Ara (Ctrl+F)', openFind),
     canPrint() ? tbtn('print', 'Yazdır (Ctrl+P)', doPrint) : null,
@@ -434,17 +568,22 @@ export async function mountPdf(root, data, app) {
   });
   ro.observe(scroller);
   layout();
+  annot.refreshAll();
   status.textContent = `Sayfa 1 / ${n}`;
+  if (data.lastPage > 1 && data.lastPage <= n) requestAnimationFrame(() => gotoPage(data.lastPage));
   setTimeout(() => scroller.focus({ preventScroll: true }), 50);
-  void app;
 
   return {
-    onBackButton: () => { if (findBar.hidden) return false; findBar.hidden = true; return true; },
-    readOnly: true,
-    serialize: () => data,
-    primaryExport: { label: 'PDF dosyasını kaydet', run: (title) => saveBlob(new Blob([bytes], { type: 'application/pdf' }), `${title}.pdf`) },
+    onBackButton: () => {
+      if (!findBar.hidden) { findBar.hidden = true; return true; }
+      return annot.back();
+    },
+    serialize: () => ({ bytes, annots: annot.items(), lastPage: currentPage() }),
+    primaryExport: { label: 'PDF dosyasını kaydet', run: (title) => savePdf(title) },
     fileMenu: (title) => [
-      { label: 'PDF dosyasını kaydet', icon: 'download', onClick: () => saveBlob(new Blob([bytes], { type: 'application/pdf' }), `${title()}.pdf`) },
+      { label: 'PDF dosyasını kaydet', icon: 'download', onClick: () => savePdf(title()) },
+      { label: 'Not ekle ve imzala', icon: 'signature', onClick: () => annot.toggleBar(true) },
+      { label: 'Sayfa işlemleri…', icon: 'pages', onClick: () => setTimeout(() => pageMenu(toolbar), 0) },
       canPrint() ? { label: 'Yazdır', icon: 'print', hint: 'Ctrl+P', onClick: doPrint } : null,
       { label: 'Metni dışa aktar (.txt)', icon: 'download', onClick: async () => {
         const parts = [];
@@ -455,11 +594,12 @@ export async function mountPdf(root, data, app) {
     ],
     destroy() {
       destroyed = true;
+      annot.destroy();
       io.disconnect();
       ro.disconnect();
       root.removeEventListener('keydown', onKey);
       for (const p of pages) if (p.task) p.task.cancel();
-      pdf.destroy().catch(() => {});
+      if (pdf) Promise.resolve().then(() => pdf.loadingTask.destroy()).catch(() => {});
       clear(root);
       root.classList.remove('editor', 'editor-pdf');
     },

@@ -1,6 +1,7 @@
 // Sunuyu PowerPoint (.pptx) dosyasına çevirir (pptxgenjs). Resimler yalnızca gömülü veri
 // olarak eklenir; hiçbir dış adres yüklenmez. Şekil adları beyaz listeden geçer.
 import PptxGenJS from 'pptxgenjs';
+import JSZip from 'jszip';
 import { sanitizeSlideHtml } from '../core/sanitize.js';
 import { isSafeUrl } from '../core/platform.js';
 
@@ -224,8 +225,44 @@ export async function exportPptx(deck, title = 'Sunu') {
     }
     if (s.notes) slide.addNotes(String(s.notes).slice(0, 100000));
   }
-  const out = await pptx.write({ outputType: 'blob' });
+  let out = await pptx.write({ outputType: 'blob' });
+  if (deck.slides.some((s) => TRANSITION_XML[s.transition])) {
+    try {
+      out = await addTransitions(out, deck.slides);
+    } catch (e) {
+      console.warn('Geçişler eklenemedi', e);
+    }
+  }
   return new Blob([out], { type: 'application/vnd.openxmlformats-officedocument.presentationml.presentation' });
+}
+
+// pptxgenjs geçiş desteklemez: oluşan dosyadaki slayt XML'lerine standart <p:transition> eklenir.
+// Değerler sabit bir tablodan gelir; kullanıcı verisi XML'e yazılmaz.
+const TRANSITION_XML = {
+  fade: '<p:transition spd="med"><p:fade/></p:transition>',
+  push: '<p:transition spd="med"><p:push dir="l"/></p:transition>',
+  wipe: '<p:transition spd="med"><p:wipe dir="r"/></p:transition>',
+  cover: '<p:transition spd="med"><p:cover dir="u"/></p:transition>',
+  zoom: '<p:transition spd="med"><p:zoom/></p:transition>',
+};
+
+async function addTransitions(blob, slides) {
+  const zip = await JSZip.loadAsync(blob);
+  for (let i = 0; i < slides.length; i++) {
+    const xml = TRANSITION_XML[slides[i].transition];
+    if (!xml) continue;
+    const name = 'ppt/slides/slide' + (i + 1) + '.xml';
+    const f = zip.file(name);
+    if (!f) continue;
+    let s = await f.async('string');
+    if (s.includes('<p:transition')) continue;
+    // Şemaya göre sıra: cSld, clrMapOvr, transition, timing, extLst
+    const m = /<p:timing[\s>]|<p:extLst[\s>]|<\/p:sld>/.exec(s);
+    if (!m) continue;
+    s = s.slice(0, m.index) + xml + s.slice(m.index);
+    zip.file(name, s);
+  }
+  return zip.generateAsync({ type: 'blob', compression: 'DEFLATE' });
 }
 
 async function addItem(pptx, slide, it) {

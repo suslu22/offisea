@@ -3,4 +3,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="offisea_documents" path="Documents/Offisea/" />
     <cache-path name="offisea_cache" path="." />
+    <!-- Belge tarama: kamera uygulamasının çektiği fotoğraf yalnızca uygulamanın kendi resim klasörüne yazılır -->
+    <external-files-path name="offisea_camera" path="Pictures/" />
 </paths>

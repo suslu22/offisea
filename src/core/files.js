@@ -50,6 +50,23 @@ export function pickFile(accept = ACCEPT_ALL) {
   });
 }
 
+/** Birden çok dosya seçtirir (iptalde boş dizi). */
+export function pickFiles(accept = ACCEPT_ALL) {
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.multiple = true;
+    input.style.display = 'none';
+    let settled = false;
+    const finish = (f) => { if (!settled) { settled = true; input.remove(); resolve(f); } };
+    input.addEventListener('change', () => finish(Array.from(input.files || [])));
+    input.addEventListener('cancel', () => finish([]));
+    document.body.append(input);
+    input.click();
+  });
+}
+
 export function readArrayBuffer(file) {
   if (file.arrayBuffer) return file.arrayBuffer();
   return new Promise((res, rej) => {

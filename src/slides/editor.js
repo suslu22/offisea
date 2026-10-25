@@ -1,7 +1,8 @@
 // Sunum (PowerPoint) düzenleyicisi.
 // Model değiştirilemez nesnelerden oluşur; geri alma yığını eski deste nesnelerine başvuru tutar.
 // Metin düzenleme contenteditable ile yapılır; okunan her HTML DOMPurify'dan geçer.
-import { h, tbtn, tsep, tselect, popupMenu, colorPicker, formDialog, toast, clear, icon, isMobileLayout, closeMenus } from '../core/ui.js';
+import { h, tbtn, tsep, tselect, popupMenu, colorPicker, formDialog, toast, clear, icon, isMobileLayout, closeMenus, modal } from '../core/ui.js';
+import { THEMES, themeById, applyThemeToSlide, TRANSITIONS, animateTransition } from './themes.js';
 import { sanitizeSlideHtml } from '../core/sanitize.js';
 import { pickFile, normalizeImage } from '../core/files.js';
 import { saveBlob, printElement, canPrint, isSafeUrl, openExternal } from '../core/platform.js';
@@ -211,6 +212,7 @@ export async function mountSlides(root, data, app) {
         class: 'thumb' + (i === cur ? ' active' : ''), role: 'option', 'aria-selected': i === cur ? 'true' : 'false',
         'aria-label': `Slayt ${i + 1}`, dataset: { i: String(i) },
       }, h('span', { class: 'thumb-num' }, String(i + 1)), sc);
+      if (s.transition) t.append(h('span', { class: 'thumb-tr', title: 'Geçiş: ' + ((TRANSITIONS.find((x) => x.id === s.transition) || {}).label || '') }, icon('transition', 12)));
       if (s.notes) t.title = 'Notları var';
       thumbs.append(t);
     });
@@ -312,8 +314,11 @@ export async function mountSlides(root, data, app) {
   // ---- Slayt işlemleri ----------------------------------------------------------------------
   function addSlide(layout) {
     if (editing) endEdit();
-    const s = newSlide(layout, deck.w, deck.h);
+    const th = themeById(deck.theme);
+    let s = newSlide(layout, deck.w, deck.h);
+    if (th) s = applyThemeToSlide(s, th);
     const base = curSlide();
+    if (base && base.transition) s.transition = base.transition;
     if (base && base.bg && base.bg !== '#ffffff') s.bg = base.bg;
     if (base && base.bgImg) s.bgImg = base.bgImg;
     const slides = deck.slides.slice();
@@ -413,6 +418,56 @@ export async function mountSlides(root, data, app) {
     commit({ ...deck, slides: deck.slides.map((x) => ({ ...x, bg: s.bg, bgImg: s.bgImg })) });
     refresh();
     toast('Arka plan tüm slaytlara uygulandı.', { type: 'success' });
+  }
+
+  // ---- Renk teması ve geçişler ------------------------------------------------------------------
+  function themeDialog() {
+    if (editing) endEdit();
+    const grid = h('div', { class: 'theme-grid', role: 'listbox', 'aria-label': 'Renk temaları' });
+    let close = null;
+    for (const t of THEMES) {
+      const card = h('button', { class: 'theme-card' + (deck.theme === t.id ? ' on' : ''), type: 'button', role: 'option', 'aria-selected': deck.theme === t.id ? 'true' : 'false', title: t.name },
+        h('span', { class: 'theme-prev', style: { background: t.bg } },
+          h('span', { class: 'theme-prev-title', style: { color: t.title, fontFamily: '"' + t.font + '", Calibri, Arial, sans-serif' } }, 'Başlık'),
+          h('span', { class: 'theme-prev-text', style: { background: t.muted } }),
+          h('span', { class: 'theme-prev-text short', style: { background: t.muted } }),
+          h('span', { class: 'theme-prev-bar', style: { background: t.accent } })),
+        h('span', { class: 'theme-name' }, t.name));
+      card.addEventListener('click', () => {
+        const prev = themeById(deck.theme);
+        commit({ ...deck, theme: t.id, slides: deck.slides.map((x) => applyThemeToSlide(x, t, prev)) });
+        refresh();
+        toast('“' + t.name + '” teması tüm slaytlara uygulandı.', { type: 'success' });
+        if (close) close(true);
+      });
+      grid.append(card);
+    }
+    modal({
+      title: 'Renk teması',
+      body: h('div', null, h('p', { class: 'muted' }, 'Tema arka planı, başlık ve metin renklerini, yazı tipini ve şekil rengini tüm slaytlarda değiştirir. Geri almak için Ctrl+Z.'), grid),
+      actions: [{ label: 'Kapat', value: null }],
+      onClose: (c) => { close = c; },
+    });
+  }
+
+  function setTransition(id, all = false) {
+    if (editing) endEdit();
+    const v = id === 'none' ? undefined : id;
+    if (all) commit({ ...deck, slides: deck.slides.map((x) => ({ ...x, transition: v })) });
+    else commit(withSlide({ ...curSlide(), transition: v }));
+    refresh();
+    if (all) toast('Geçiş tüm slaytlara uygulandı.', { type: 'success' });
+  }
+
+  function transitionMenu(anchor) {
+    const curT = curSlide().transition || 'none';
+    popupMenu(anchor, [
+      { header: 'Bu slayda geçiş' },
+      ...TRANSITIONS.map((t) => ({ label: t.label + (t.id === curT ? '  ✓' : ''), icon: t.id === 'none' ? 'close' : 'transition', onClick: () => setTransition(t.id) })),
+      { separator: true },
+      { label: 'Bu geçişi tüm slaytlara uygula', icon: 'check', onClick: () => setTransition(curT, true) },
+      { label: 'Önizle', icon: 'play', onClick: () => startShow(cur > 0 && curT !== 'none' ? cur - 1 : cur, { previewTo: cur }) },
+    ]);
   }
 
   async function slideSize() {
@@ -1364,7 +1419,9 @@ export async function mountSlides(root, data, app) {
     tbtn('front', 'Düzenle ve hizala', (e, b) => arrangeMenu(b)),
     tbtn('trash', 'Seçileni sil (Del)', () => { if (editing) return; deleteSelected(); }),
     tsep(),
-    tbtn('palette', 'Tasarım: arka plan ve slayt boyutu', (e, b) => popupMenu(b, [
+    tbtn('palette', 'Tasarım: tema, arka plan ve slayt boyutu', (e, b) => popupMenu(b, [
+      { label: 'Renk teması…', icon: 'palette', onClick: themeDialog },
+      { separator: true },
       { label: 'Arka plan rengi…', icon: 'fill', onClick: () => pickBg(b) },
       { label: 'Arka plan resmi…', icon: 'image', onClick: pickBgImage },
       curSlide().bgImg ? { label: 'Arka plan resmini kaldır', icon: 'close', onClick: () => setBg({ bgImg: undefined }) } : null,
@@ -1373,6 +1430,7 @@ export async function mountSlides(root, data, app) {
       { label: 'Slayt boyutu…', icon: 'slide', onClick: slideSize },
     ]), { text: 'Tasarım', cls: 'tb-wide' }),
     tbtn('notes', 'Konuşmacı notlarını göster/gizle', () => { showNotes = !showNotes; notes.hidden = !showNotes; applyScale(); renderSel(); }),
+    tbtn('transition', 'Slayt geçişi', (e, b) => transitionMenu(b), { text: 'Geçiş', cls: 'tb-wide' }),
     zoomSel,
     tbtn('play', 'Slayt gösterisi (F5)', () => startShow(0), { text: 'Sun', cls: 'tb-wide tb-accent' }),
   );
@@ -1591,7 +1649,7 @@ export async function mountSlides(root, data, app) {
 
   // ---- Slayt gösterisi -----------------------------------------------------------------------
   let expectPop = false;
-  function startShow(from) {
+  function startShow(from, { previewTo = null } = {}) {
     if (editing) endEdit();
     closeMenus();
     let i = Math.max(0, Math.min(deck.slides.length - 1, from));
@@ -1602,19 +1660,31 @@ export async function mountSlides(root, data, app) {
     ov.append(holder, counter, closeBtn);
     document.body.append(ov);
     const n = deck.slides.length;
-    const draw = () => {
-      clear(holder);
+    // dir: 1 ileri, -1 geri, 0 animasyonsuz (ilk açılış, yeniden boyutlandırma)
+    const draw = (dir = 0) => {
+      const layers = [...holder.children];
+      // Hızlı geçişlerde yalnızca en son görünen katman korunur
+      layers.slice(0, -1).forEach((x) => x.remove());
+      const old = dir ? layers[layers.length - 1] : null;
+      if (!dir) clear(holder);
+      let content;
       if (i >= n) {
-        holder.append(h('div', { class: 'show-end' }, 'Slayt gösterisinin sonu. Çıkmak için tıklayın.'));
+        content = h('div', { class: 'show-end' }, 'Slayt gösterisinin sonu. Çıkmak için tıklayın.');
         counter.textContent = '';
-        return;
+      } else {
+        const s = Math.min(window.innerWidth / deck.w, window.innerHeight / deck.h);
+        content = scaledSlide(deck.slides[i], deck, deck.w * s);
+        counter.textContent = (i + 1) + ' / ' + n;
       }
-      const s = Math.min(window.innerWidth / deck.w, window.innerHeight / deck.h);
-      holder.append(scaledSlide(deck.slides[i], deck, deck.w * s));
-      counter.textContent = `${i + 1} / ${n}`;
+      const layer = h('div', { class: 'show-layer' }, content);
+      holder.append(layer);
+      // İleri giderken gelen slaydın, geri giderken çıkan slaydın geçişi kullanılır
+      const src = dir > 0 ? deck.slides[i] : dir < 0 ? deck.slides[i + 1] : null;
+      const type = i >= n ? 'fade' : (src && src.transition) || 'none';
+      if (old) animateTransition(layer, old, type, { back: dir < 0 });
     };
-    const next = () => { if (i < n) { i++; draw(); } else close(); };
-    const prev = () => { if (i > 0) { i--; draw(); } };
+    const next = () => { if (i < n) { i++; draw(1); } else close(); };
+    const prev = () => { if (i > 0) { i--; draw(-1); } };
     const onK = (e) => {
       const k = e.key;
       if (['ArrowRight', 'ArrowDown', 'PageDown', ' ', 'Enter', 'n', 'N'].includes(k)) next();
@@ -1667,6 +1737,8 @@ export async function mountSlides(root, data, app) {
     if (ov.requestFullscreen) ov.requestFullscreen().then(() => { if (show) show.wasFull = true; }).catch(() => {});
     draw();
     ov.focus({ preventScroll: true });
+    // Geçiş önizlemesi: kısa bir süre sonra seçili slayda geçilir
+    if (previewTo != null && previewTo !== i) setTimeout(() => { if (show && i < previewTo) { i = previewTo; draw(1); } }, 700);
   }
 
   // Android geri tuşu / tarayıcı geri: önce gösteriyi kapat.

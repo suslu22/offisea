@@ -2,6 +2,7 @@
 // Model değiştirilemez (immutable) kullanılır: her değişiklik yeni nesne üretir, böylece
 // geri alma yığını yalnızca eski nesnelere başvuru tutar (büyük resimler kopyalanmaz).
 import { sanitizeSlideHtml } from '../core/sanitize.js';
+import { TRANSITION_IDS, themeById } from './themes.js';
 
 export const DEF_W = 960;
 export const DEF_H = 540;
@@ -75,9 +76,11 @@ export function normalizeDeck(d) {
     bg: typeof s.bg === 'string' ? s.bg : '#ffffff',
     bgImg: typeof s.bgImg === 'string' && /^data:image\//.test(s.bgImg) ? s.bgImg : undefined,
     notes: typeof s.notes === 'string' ? s.notes : '',
+    transition: TRANSITION_IDS.has(s.transition) && s.transition !== 'none' ? s.transition : undefined,
     items: Array.isArray(s.items) ? s.items.filter((it) => it && typeof it === 'object').map((it) => ({ ...it, id: it.id || uid() })) : [],
   }));
-  return { v: 1, w, h, slides: slides.length ? slides : [newSlide('title', w, h)] };
+  const theme = typeof d.theme === 'string' && themeById(d.theme) ? d.theme : undefined;
+  return { v: 1, w, h, theme, slides: slides.length ? slides : [newSlide('title', w, h)] };
 }
 
 // ---- Şekiller ------------------------------------------------------------------------------

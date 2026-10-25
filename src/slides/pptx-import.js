@@ -314,6 +314,21 @@ export async function importPptx(buffer) {
   return { v: 1, w: W, h: H, slides };
 }
 
+// PowerPoint geçişini en yakın desteklenen geçişe çevirir (bilinmeyenler yumuşak geçiş olur)
+const TRANSITION_MAP = { fade: 'fade', dissolve: 'fade', cut: 'fade', push: 'push', pull: 'cover', cover: 'cover', wipe: 'wipe', split: 'wipe', strips: 'wipe', wedge: 'wipe', wheel: 'wipe', randomBar: 'wipe', blinds: 'wipe', checker: 'wipe', circle: 'zoom', diamond: 'zoom', plus: 'zoom', zoom: 'zoom', newsflash: 'zoom' };
+function readTransition(doc) {
+  if (!doc) return undefined;
+  const list = doc.getElementsByTagNameNS('*', 'transition');
+  if (!list.length) return undefined;
+  for (const tr of Array.from(list)) {
+    for (const c of Array.from(tr.children)) {
+      const t = TRANSITION_MAP[c.localName];
+      if (t) return t;
+    }
+  }
+  return 'fade';
+}
+
 async function readSlide(R, slidePath, ctx) {
   const doc = await R.xml(slidePath);
   const srels = await R.rels(slidePath);
@@ -403,7 +418,7 @@ async function readSlide(R, slidePath, ctx) {
       }
     }
   }
-  return { id: uid(), bg, bgImg, notes, items };
+  return { id: uid(), bg, bgImg, notes, items, transition: readTransition(doc) };
 }
 
 async function readTree(doc, ctx, items) {
