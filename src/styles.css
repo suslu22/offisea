@@ -1011,8 +1011,11 @@ textarea.pdf-field { resize: none; padding: 1px 2px; overflow: auto; }
   body.printing .print-area { display: block; }
   .print-doc { color: #000; }
   .print-sheet-wrap table { border-collapse: collapse; table-layout: fixed; font-family: Calibri, Carlito, Arial, sans-serif; font-size: 10pt; }
-  .print-sheet-wrap td, .print-sheet-wrap th { border: 1px solid #bbb; padding: 2px 5px; white-space: nowrap; overflow: hidden; }
+  .print-sheet-wrap td, .print-sheet-wrap th { border: 0.5px solid #bbb; padding: 2px 5px; white-space: nowrap; overflow: hidden; }
   .print-sheet-wrap tr { break-inside: avoid; page-break-inside: avoid; }
+  .print-sheet-wrap td.spill-cell { overflow: visible; }
+  .print-sheet-wrap td .spill { display: block; overflow: hidden; white-space: nowrap; position: relative; }
+  .print-sheet-wrap.no-grid td { border-style: none; }
   .print-slide { position: relative; overflow: hidden; break-after: page; page-break-after: always; }
   .print-slide:last-child { break-after: auto; page-break-after: auto; }
   .print-slide .slide-render { box-shadow: none; }

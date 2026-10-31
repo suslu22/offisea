@@ -2006,7 +2006,8 @@ export async function mountSheet(root, data, app) {
     // dar tablolarda sütunlar orantılı genişler, geniş tablolar sayfaya sığacak kadar küçültülür.
     const PAGE_W = (273 / 25.4) * 96;
     printElement(() => {
-      const wrap = h('div', { class: 'print-sheet-wrap' });
+      // Kılavuz çizgileri kapalı sayfalarda yalnızca hücre kenarlıkları basılır
+      const wrap = h('div', { class: wb.sheets[si].grid === false ? 'print-sheet-wrap no-grid' : 'print-sheet-wrap' });
       const table = sheetToTable(wb, si);
       const W = Math.max(1, +table.dataset.width || 0);
       if (W <= PAGE_W) {

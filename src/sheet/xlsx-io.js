@@ -564,9 +564,33 @@ export function exportCsv(wb, si, { sep = ',', localized = false } = {}) {
 }
 
 // Yazdırma / HTML için tablo görünümü (yalnızca textContent ile oluşturulur).
+const hasContent = (cell) => !!cell && (cell.f != null || (cell.v != null && cell.v !== ''));
+const isWhite = (c) => typeof c === 'string' && /^#?(fff|ffffff)$/i.test(c.trim());
+// Kâğıtta görünen bir şeyi olan hücre: değer, dolgu rengi ya da kenarlık (yalnızca yazı biçimi olan boş hücreler sayılmaz)
+const isVisible = (cell) => {
+  if (hasContent(cell)) return true;
+  const s = cell && cell.s;
+  return !!s && ((s.bg && !isWhite(s.bg)) || !!(s.bt || s.bb || s.bl || s.br));
+};
+
+// Yazdırılacak alan: görünen son satır ve sütuna kadar (tüm satıra/sütuna verilmiş biçimler alanı büyütmez)
+function printBounds(sh) {
+  let maxR = -1, maxC = -1;
+  for (const [k, cell] of sh.cells) {
+    if (!isVisible(cell)) continue;
+    const r = rowOf(k), c = colOf(k);
+    if (r > maxR) maxR = r;
+    if (c > maxC) maxC = c;
+  }
+  for (const m of sh.merges) {
+    if (m.r1 <= maxR && m.c1 <= maxC) { maxR = Math.max(maxR, m.r2); maxC = Math.max(maxC, m.c2); }
+  }
+  return { maxR, maxC };
+}
+
 export function sheetToTable(wb, si, doc = document) {
   const sh = wb.sheets[si];
-  const b = wb.bounds(si);
+  const b = printBounds(sh);
   const table = doc.createElement('table');
   table.className = 'print-sheet';
   const covered = new Set();
@@ -575,6 +599,7 @@ export function sheetToTable(wb, si, doc = document) {
     mergeStart.set(key(m.r1, m.c1), m);
     for (let r = m.r1; r <= m.r2; r++) for (let c = m.c1; c <= m.c2; c++) if (r !== m.r1 || c !== m.c1) covered.add(key(r, c));
   }
+  const colWidth = (c) => (sh.colW.has(c) ? sh.colW.get(c) : DEF_W);
   // Gizli sütun ve satırlar tabloya hiç girmez; birleştirmeler yalnızca görünenleri kapsar
   const colHidden = (c) => sh.colW.get(c) === 0;
   const rowHidden = (r) => sh.rowH.get(r) === 0;
@@ -583,7 +608,7 @@ export function sheetToTable(wb, si, doc = document) {
   let total = 0;
   for (let c = 0; c <= b.maxC; c++) {
     if (colHidden(c)) continue;
-    const w = sh.colW.has(c) ? sh.colW.get(c) : DEF_W;
+    const w = colWidth(c);
     const col = doc.createElement('col');
     col.style.width = w + 'px';
     col.dataset.w = String(w);
@@ -595,6 +620,8 @@ export function sheetToTable(wb, si, doc = document) {
   for (let r = 0; r <= b.maxR; r++) {
     if (rowHidden(r)) continue;
     const tr = doc.createElement('tr');
+    // Boş satırlar da sayfadaki yüksekliklerini korur
+    tr.style.height = (sh.rowH.has(r) ? sh.rowH.get(r) : DEF_H) + 'px';
     for (let c = 0; c <= b.maxC; c++) {
       const k = key(r, c);
       if (covered.has(k) || colHidden(c)) continue;
@@ -605,8 +632,26 @@ export function sheetToTable(wb, si, doc = document) {
       if (cell) {
         const v = cell.f != null ? wb.value(si, r, c) : cell.v;
         const s = cell.s || {};
-        td.textContent = formatValue(v, s.z);
+        const text = formatValue(v, s.z);
         applyCellCss(td.style, s, v);
+        // Excel'deki gibi: sola dayalı uzun yazı, sağındaki boş hücrelerin üzerine taşar
+        let spill = 0;
+        if (!m && text && typeof v === 'string' && !s.wr && (!s.ha || s.ha === 'left')) {
+          for (let c2 = c + 1; c2 <= b.maxC; c2++) {
+            if (colHidden(c2)) continue;
+            const k2 = key(r, c2);
+            if (covered.has(k2) || mergeStart.has(k2) || hasContent(sh.cells.get(k2))) break;
+            spill += colWidth(c2);
+          }
+        }
+        if (spill) {
+          const span = doc.createElement('span');
+          span.className = 'spill';
+          span.style.width = ((colWidth(c) + spill) / colWidth(c)) * 100 + '%';
+          span.textContent = text;
+          td.classList.add('spill-cell');
+          td.append(span);
+        } else td.textContent = text;
       }
       tr.append(td);
     }
