@@ -27,6 +27,7 @@ public class PrintPlugin extends Plugin {
         String raw = call.getString("name", "Offisea");
         final String name = raw.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_");
         final String jobName = name.length() > 80 ? name.substring(0, 80) : name;
+        final boolean landscape = Boolean.TRUE.equals(call.getBoolean("landscape", false));
         getActivity().runOnUiThread(() -> {
             try {
                 PrintManager pm = (PrintManager) getContext().getSystemService(Context.PRINT_SERVICE);
@@ -44,7 +45,10 @@ public class PrintPlugin extends Plugin {
                         call.resolve();
                     }
                 };
-                pm.print(jobName, wrapper, new PrintAttributes.Builder().build());
+                PrintAttributes.Builder attrs = new PrintAttributes.Builder();
+                // Tablolar için yazdırma ekranı yatay A4 ile açılır; kullanıcı yine değiştirebilir
+                if (landscape) attrs.setMediaSize(PrintAttributes.MediaSize.ISO_A4.asLandscape());
+                pm.print(jobName, wrapper, attrs.build());
             } catch (Exception e) {
                 call.reject("Yazdırma başlatılamadı.");
             }

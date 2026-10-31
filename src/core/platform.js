@@ -21,13 +21,13 @@ export function canPrint() {
 }
 
 let nativePrinter = null;
-async function nativePrint() {
+async function nativePrint(landscape) {
   if (!nativePrinter) {
     const { registerPlugin } = await import('@capacitor/core');
     nativePrinter = registerPlugin('OffiseaPrint');
   }
   const name = (document.title || 'Offisea').replace(/\s+[-–]\s+Offisea$/, '');
-  await nativePrinter.print({ name });
+  await nativePrinter.print({ name, landscape: !!landscape });
 }
 
 export function isSafeUrl(url) {
@@ -111,7 +111,8 @@ export async function saveBlob(blob, filename) {
   return true;
 }
 
-export function printElement(buildContent, { pageCss = '' } = {}) {
+// `landscape`: Android yazdırma ekranı yatay A4 ile açılır (masaüstü ve web @page kuralını izler).
+export function printElement(buildContent, { pageCss = '', landscape = false } = {}) {
   if (!canPrint()) { toast('Bu cihazda yazdırma desteklenmiyor. Dosyayı indirip paylaşabilirsiniz.', { type: 'error' }); return; }
   const area = document.getElementById('print-area');
   while (area.firstChild) area.firstChild.remove();
@@ -127,7 +128,7 @@ export function printElement(buildContent, { pageCss = '' } = {}) {
   if (isNative()) {
     // Android: yazdırma ekranı kapanana kadar yazdırma görünümü korunur.
     setTimeout(() => {
-      nativePrint().catch(() => toast('Yazdırma başlatılamadı.', { type: 'error' })).finally(cleanup);
+      nativePrint(landscape).catch(() => toast('Yazdırma başlatılamadı.', { type: 'error' })).finally(cleanup);
     }, 50);
     return;
   }

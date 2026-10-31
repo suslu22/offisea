@@ -2002,11 +2002,23 @@ export async function mountSheet(root, data, app) {
 
   // ---- Dışa aktarma ve yazdırma ------------------------------------------------------------
   function doPrint() {
+    // Tablo yatay A4'ün yazılabilir genişliğini (297 mm - 2 x 12 mm kenar) tam kaplar:
+    // dar tablolarda sütunlar orantılı genişler, geniş tablolar sayfaya sığacak kadar küçültülür.
+    const PAGE_W = (273 / 25.4) * 96;
     printElement(() => {
       const wrap = h('div', { class: 'print-sheet-wrap' });
-      wrap.append(sheetToTable(wb, si));
+      const table = sheetToTable(wb, si);
+      const W = Math.max(1, +table.dataset.width || 0);
+      if (W <= PAGE_W) {
+        table.style.width = '100%';
+        for (const col of table.querySelectorAll('col')) col.style.width = ((+col.dataset.w || 0) / W) * 100 + '%';
+      } else {
+        table.style.width = W + 'px';
+        wrap.style.zoom = String(PAGE_W / W);
+      }
+      wrap.append(table);
       return wrap;
-    }, { pageCss: '@page { size: A4 landscape; margin: 12mm; }' });
+    }, { pageCss: '@page { size: A4 landscape; margin: 12mm; }', landscape: true });
   }
 
   async function exportFile(kind, title) {

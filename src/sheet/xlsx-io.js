@@ -575,22 +575,32 @@ export function sheetToTable(wb, si, doc = document) {
     mergeStart.set(key(m.r1, m.c1), m);
     for (let r = m.r1; r <= m.r2; r++) for (let c = m.c1; c <= m.c2; c++) if (r !== m.r1 || c !== m.c1) covered.add(key(r, c));
   }
+  // Gizli sütun ve satırlar tabloya hiç girmez; birleştirmeler yalnızca görünenleri kapsar
+  const colHidden = (c) => sh.colW.get(c) === 0;
+  const rowHidden = (r) => sh.rowH.get(r) === 0;
+  const visibleIn = (a, z, hidden) => { let n = 0; for (let i = a; i <= z; i++) if (!hidden(i)) n++; return Math.max(1, n); };
   const cg = doc.createElement('colgroup');
+  let total = 0;
   for (let c = 0; c <= b.maxC; c++) {
+    if (colHidden(c)) continue;
+    const w = sh.colW.has(c) ? sh.colW.get(c) : DEF_W;
     const col = doc.createElement('col');
-    col.style.width = (sh.colW.has(c) ? sh.colW.get(c) : DEF_W) + 'px';
+    col.style.width = w + 'px';
+    col.dataset.w = String(w);
+    total += w;
     cg.append(col);
   }
   table.append(cg);
+  table.dataset.width = String(total);
   for (let r = 0; r <= b.maxR; r++) {
-    if (sh.rowH.get(r) === 0) continue;
+    if (rowHidden(r)) continue;
     const tr = doc.createElement('tr');
     for (let c = 0; c <= b.maxC; c++) {
       const k = key(r, c);
-      if (covered.has(k) || sh.colW.get(c) === 0) continue;
+      if (covered.has(k) || colHidden(c)) continue;
       const td = doc.createElement('td');
       const m = mergeStart.get(k);
-      if (m) { td.rowSpan = m.r2 - m.r1 + 1; td.colSpan = m.c2 - m.c1 + 1; }
+      if (m) { td.rowSpan = visibleIn(m.r1, m.r2, rowHidden); td.colSpan = visibleIn(m.c1, m.c2, colHidden); }
       const cell = sh.cells.get(k);
       if (cell) {
         const v = cell.f != null ? wb.value(si, r, c) : cell.v;
