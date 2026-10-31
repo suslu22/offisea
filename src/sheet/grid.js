@@ -2002,24 +2002,39 @@ export async function mountSheet(root, data, app) {
 
   // ---- Dışa aktarma ve yazdırma ------------------------------------------------------------
   function doPrint() {
-    // Tablo yatay A4'ün yazılabilir genişliğini (297 mm - 2 x 12 mm kenar) tam kaplar:
-    // dar tablolarda sütunlar orantılı genişler, geniş tablolar sayfaya sığacak kadar küçültülür.
-    const PAGE_W = (273 / 25.4) * 96;
+    // Tablonun dolu kısmı, ekran görüntüsü gibi en-boy oranı korunarak tek bir yatay A4 sayfaya
+    // sığdırılır (esnetilmez). Sayfa kenar boşluğu 0 olduğundan tarayıcı başlık/altbilgi eklemez;
+    // boşluğu kapsayıcının 10 mm iç boşluğu verir.
+    const MM = 96 / 25.4;
+    const PAGE_W = 277 * MM, PAGE_H = 190 * MM;
     printElement(() => {
-      // Kılavuz çizgileri kapalı sayfalarda yalnızca hücre kenarlıkları basılır
-      const wrap = h('div', { class: wb.sheets[si].grid === false ? 'print-sheet-wrap no-grid' : 'print-sheet-wrap' });
+      // Kılavuz çizgileri kapalıysa ya da tabloya kenarlık çizilmişse (Excel'deki gibi) yalnızca kenarlıklar basılır
+      const sh = wb.sheets[si];
+      let drawn = false;
+      for (const cell of sh.cells.values()) { const s = cell && cell.s; if (s && (s.bt || s.bb || s.bl || s.br)) { drawn = true; break; } }
+      const wrap = h('div', { class: sh.grid === false || drawn ? 'print-sheet-wrap no-grid' : 'print-sheet-wrap' });
       const table = sheetToTable(wb, si);
-      const W = Math.max(1, +table.dataset.width || 0);
-      if (W <= PAGE_W) {
-        table.style.width = '100%';
-        for (const col of table.querySelectorAll('col')) col.style.width = ((+col.dataset.w || 0) / W) * 100 + '%';
-      } else {
-        table.style.width = W + 'px';
-        wrap.style.zoom = String(PAGE_W / W);
-      }
+      table.style.width = Math.max(1, +table.dataset.width || 0) + 'px';
       wrap.append(table);
+      // Gerçek boyut, sayfa dışında görünmez bir kopyada ölçülür
+      const probe = h('div', { style: { position: 'fixed', left: '-100000px', top: '0', visibility: 'hidden' } });
+      probe.append(wrap);
+      document.body.append(probe);
+      const W = Math.max(1, table.offsetWidth), H = Math.max(1, table.offsetHeight);
+      // Küçük tablolar en çok 2 kat büyütülür; yuvarlama payı için %3 eksik
+      let k = Math.min(2, PAGE_W / W, PAGE_H / H) * 0.97;
+      // Çizgiler 1 pikselden ince olamadığından çok küçültülen tablo hesaplanandan büyük kalabilir:
+      // küçültülmüş hâli yeniden ölçülüp düzeltilir
+      for (let i = 0; i < 4; i++) {
+        table.style.zoom = String(k);
+        const r = table.getBoundingClientRect();
+        const over = Math.max(r.width / (PAGE_W * 0.97), r.height / (PAGE_H * 0.97));
+        if (over <= 1) break;
+        k /= over * 1.02;
+      }
+      probe.remove();
       return wrap;
-    }, { pageCss: '@page { size: A4 landscape; margin: 12mm; }', landscape: true });
+    }, { pageCss: '@page { size: A4 landscape; margin: 0; }', landscape: true });
   }
 
   async function exportFile(kind, title) {

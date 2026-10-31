@@ -573,19 +573,30 @@ const isVisible = (cell) => {
   return !!s && ((s.bg && !isWhite(s.bg)) || !!(s.bt || s.bb || s.bl || s.br));
 };
 
-// Yazdırılacak alan: görünen son satır ve sütuna kadar (tüm satıra/sütuna verilmiş biçimler alanı büyütmez)
+// Yazdırılacak alan: görünen ilk ve son satır/sütun arası (tüm satıra/sütuna verilmiş biçimler alanı büyütmez)
 function printBounds(sh) {
-  let maxR = -1, maxC = -1;
+  let minR = Infinity, minC = Infinity, maxR = -1, maxC = -1;
   for (const [k, cell] of sh.cells) {
     if (!isVisible(cell)) continue;
     const r = rowOf(k), c = colOf(k);
+    if (r < minR) minR = r;
+    if (c < minC) minC = c;
     if (r > maxR) maxR = r;
     if (c > maxC) maxC = c;
   }
-  for (const m of sh.merges) {
-    if (m.r1 <= maxR && m.c1 <= maxC) { maxR = Math.max(maxR, m.r2); maxC = Math.max(maxC, m.c2); }
+  if (maxR < 0) return { minR: 0, minC: 0, maxR: -1, maxC: -1 };
+  // Alana değen birleştirilmiş hücreler bütünüyle alana alınır
+  for (let pass = 0, grew = true; grew && pass < 4; pass++) {
+    grew = false;
+    for (const m of sh.merges) {
+      if (m.r2 < minR || m.r1 > maxR || m.c2 < minC || m.c1 > maxC) continue;
+      if (m.r1 < minR) { minR = m.r1; grew = true; }
+      if (m.c1 < minC) { minC = m.c1; grew = true; }
+      if (m.r2 > maxR) { maxR = m.r2; grew = true; }
+      if (m.c2 > maxC) { maxC = m.c2; grew = true; }
+    }
   }
-  return { maxR, maxC };
+  return { minR, minC, maxR, maxC };
 }
 
 export function sheetToTable(wb, si, doc = document) {
@@ -606,7 +617,7 @@ export function sheetToTable(wb, si, doc = document) {
   const visibleIn = (a, z, hidden) => { let n = 0; for (let i = a; i <= z; i++) if (!hidden(i)) n++; return Math.max(1, n); };
   const cg = doc.createElement('colgroup');
   let total = 0;
-  for (let c = 0; c <= b.maxC; c++) {
+  for (let c = b.minC; c <= b.maxC; c++) {
     if (colHidden(c)) continue;
     const w = colWidth(c);
     const col = doc.createElement('col');
@@ -617,12 +628,12 @@ export function sheetToTable(wb, si, doc = document) {
   }
   table.append(cg);
   table.dataset.width = String(total);
-  for (let r = 0; r <= b.maxR; r++) {
+  for (let r = b.minR; r <= b.maxR; r++) {
     if (rowHidden(r)) continue;
     const tr = doc.createElement('tr');
     // Boş satırlar da sayfadaki yüksekliklerini korur
     tr.style.height = (sh.rowH.has(r) ? sh.rowH.get(r) : DEF_H) + 'px';
-    for (let c = 0; c <= b.maxC; c++) {
+    for (let c = b.minC; c <= b.maxC; c++) {
       const k = key(r, c);
       if (covered.has(k) || colHidden(c)) continue;
       const td = doc.createElement('td');

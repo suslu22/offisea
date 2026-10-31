@@ -1004,18 +1004,20 @@ textarea.pdf-field { resize: none; padding: 1px 2px; overflow: auto; }
 .textLayer.selecting .endOfContent { top: 0; }
 
 /* ---- Yazdırma -------------------------------------------------------------------------------- */
+/* Tablo yazdırma görünümü (yazdırmadan önce boyutu ölçülebilsin diye @media print dışında) */
+.print-sheet-wrap { padding: 10mm; display: flex; justify-content: center; align-items: flex-start; background: #fff; color: #000; box-sizing: border-box; max-height: 209mm; overflow: hidden; }
+.print-sheet-wrap table { border-collapse: collapse; table-layout: fixed; font-family: Calibri, Carlito, Arial, sans-serif; font-size: 10pt; }
+.print-sheet-wrap td, .print-sheet-wrap th { border: 0.5px solid #bbb; padding: 2px 5px; white-space: nowrap; overflow: hidden; }
+.print-sheet-wrap tr { break-inside: avoid; page-break-inside: avoid; }
+.print-sheet-wrap td.spill-cell { overflow: visible; }
+.print-sheet-wrap td .spill { display: block; overflow: hidden; white-space: nowrap; position: relative; }
+.print-sheet-wrap.no-grid td { border-style: none; }
 .print-area { display: none; }
 @media print {
   html, body { height: auto; overflow: visible; background: #fff; }
   body.printing #app, body.printing #toasts, body.printing .popup-menu, body.printing .modal-overlay, body.printing .loading-overlay { display: none !important; }
   body.printing .print-area { display: block; }
   .print-doc { color: #000; }
-  .print-sheet-wrap table { border-collapse: collapse; table-layout: fixed; font-family: Calibri, Carlito, Arial, sans-serif; font-size: 10pt; }
-  .print-sheet-wrap td, .print-sheet-wrap th { border: 0.5px solid #bbb; padding: 2px 5px; white-space: nowrap; overflow: hidden; }
-  .print-sheet-wrap tr { break-inside: avoid; page-break-inside: avoid; }
-  .print-sheet-wrap td.spill-cell { overflow: visible; }
-  .print-sheet-wrap td .spill { display: block; overflow: hidden; white-space: nowrap; position: relative; }
-  .print-sheet-wrap.no-grid td { border-style: none; }
   .print-slide { position: relative; overflow: hidden; break-after: page; page-break-after: always; }
   .print-slide:last-child { break-after: auto; page-break-after: auto; }
   .print-slide .slide-render { box-shadow: none; }
